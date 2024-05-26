@@ -18,10 +18,7 @@ echo "Start network test......"
 ./socketpair
 ./sockoption
 ./listen_backlog
-# ./send_buf_full
-./http_server &
-./http_client
-./tcp_err
-./udp_err
+./send_buf_full
+
 
 echo "All network test passed"

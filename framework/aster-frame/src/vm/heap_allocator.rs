@@ -1,22 +1,20 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use crate::config::{KERNEL_HEAP_SIZE, PAGE_SIZE};
+use crate::prelude::*;
+use crate::sync::SpinLock;
+use crate::trap::disable_local;
+use crate::vm::frame_allocator::FRAME_ALLOCATOR;
+use crate::Error;
+use align_ext::AlignExt;
+use buddy_system_allocator::Heap;
 use core::{
     alloc::{GlobalAlloc, Layout},
     ptr::NonNull,
 };
-
-use align_ext::AlignExt;
-use buddy_system_allocator::Heap;
 use log::debug;
 
 use super::paddr_to_vaddr;
-use crate::{
-    prelude::*,
-    sync::SpinLock,
-    trap::disable_local,
-    vm::{frame_allocator::FRAME_ALLOCATOR, PAGE_SIZE},
-    Error,
-};
 
 #[global_allocator]
 static HEAP_ALLOCATOR: LockedHeapWithRescue<32> = LockedHeapWithRescue::new(rescue);
@@ -26,14 +24,12 @@ pub fn handle_alloc_error(layout: core::alloc::Layout) -> ! {
     panic!("Heap allocation error, layout = {:?}", layout);
 }
 
-const INIT_KERNEL_HEAP_SIZE: usize = PAGE_SIZE * 256;
-
-static mut HEAP_SPACE: [u8; INIT_KERNEL_HEAP_SIZE] = [0; INIT_KERNEL_HEAP_SIZE];
+static mut HEAP_SPACE: [u8; KERNEL_HEAP_SIZE] = [0; KERNEL_HEAP_SIZE];
 
 pub fn init() {
     // Safety: The HEAP_SPACE is a static memory range, so it's always valid.
     unsafe {
-        HEAP_ALLOCATOR.init(HEAP_SPACE.as_ptr(), INIT_KERNEL_HEAP_SIZE);
+        HEAP_ALLOCATOR.init(HEAP_SPACE.as_ptr(), KERNEL_HEAP_SIZE);
     }
 }
 

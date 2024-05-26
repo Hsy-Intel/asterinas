@@ -12,12 +12,14 @@ pub(crate) mod pci;
 pub mod qemu;
 #[cfg(feature = "intel_tdx")]
 pub(crate) mod tdx_guest;
+use crate::early_println;
+#[cfg(feature = "intel_tdx")]
+use ::tdx_guest::tdx_is_enabled;
+
 pub(crate) mod timer;
 
 use core::{arch::x86_64::_rdtsc, sync::atomic::Ordering};
 
-#[cfg(feature = "intel_tdx")]
-use ::tdx_guest::tdx_is_enabled;
 use kernel::apic::ioapic;
 use log::{info, warn};
 
@@ -60,7 +62,7 @@ pub(crate) fn after_all_init() {
 pub(crate) fn interrupts_ack() {
     kernel::pic::ack();
     if let Some(apic) = kernel::apic::APIC_INSTANCE.get() {
-        apic.lock_irq_disabled().eoi();
+        apic.lock().eoi();
     }
 }
 

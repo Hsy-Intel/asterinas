@@ -4,20 +4,20 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use core::arch::global_asm;
-
 use multiboot2::{BootInformation, BootInformationHeader, MemoryAreaType};
-use spin::Once;
 
 use crate::boot::{
     kcmdline::KCmdlineArg,
     memory_region::{non_overlapping_regions_from, MemoryRegion, MemoryRegionType},
     BootloaderAcpiArg, BootloaderFramebufferArg,
 };
+use spin::Once;
+
+use core::arch::global_asm;
 
 global_asm!(include_str!("header.S"));
 
-use crate::vm::{paddr_to_vaddr, PHYS_MEM_BASE_VADDR};
+use crate::{config::PHYS_OFFSET, vm::paddr_to_vaddr};
 
 pub(super) const MULTIBOOT2_ENTRY_MAGIC: u32 = 0x36d76289;
 
@@ -50,12 +50,15 @@ fn init_kernel_commandline(kernel_cmdline: &'static Once<KCmdlineArg>) {
 }
 
 fn init_initramfs(initramfs: &'static Once<&'static [u8]>) {
-    let Some(mb2_module_tag) = MB2_INFO.get().unwrap().module_tags().next() else {
-        return;
-    };
+    let mb2_module_tag = MB2_INFO
+        .get()
+        .unwrap()
+        .module_tags()
+        .next()
+        .expect("No Multiboot2 modules found!");
     let base_addr = mb2_module_tag.start_address() as usize;
     // We must return a slice composed by VA since kernel should read every in VA.
-    let base_va = if base_addr < PHYS_MEM_BASE_VADDR {
+    let base_va = if base_addr < PHYS_OFFSET {
         paddr_to_vaddr(base_addr)
     } else {
         base_addr

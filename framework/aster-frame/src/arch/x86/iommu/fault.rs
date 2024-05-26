@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use alloc::vec::Vec;
 use core::fmt::Debug;
 
+use alloc::vec::Vec;
 use bitflags::bitflags;
 use log::info;
 use spin::Once;
 use trapframe::TrapFrame;
 use volatile::{access::ReadWrite, Volatile};
 
-use super::remapping::Capability;
 use crate::{trap::IrqLine, vm::Vaddr};
+
+use super::remapping::Capability;
 
 #[derive(Debug)]
 pub struct FaultEventRegisters {

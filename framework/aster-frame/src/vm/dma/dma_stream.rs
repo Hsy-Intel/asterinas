@@ -1,22 +1,20 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use alloc::sync::Arc;
-use core::{arch::x86_64::_mm_clflush, ops::Range};
+use core::arch::x86_64::_mm_clflush;
+use core::ops::Range;
 
-#[cfg(feature = "intel_tdx")]
-use ::tdx_guest::tdx_is_enabled;
+use crate::arch::iommu;
+use crate::error::Error;
+use crate::vm::{
+    dma::{dma_type, Daddr, DmaType},
+    HasPaddr, Paddr, VmSegment, PAGE_SIZE,
+};
+use crate::vm::{VmIo, VmReader, VmWriter};
 
 use super::{check_and_insert_dma_mapping, remove_dma_mapping, DmaError, HasDaddr};
 #[cfg(feature = "intel_tdx")]
-use crate::arch::tdx_guest;
-use crate::{
-    arch::iommu,
-    error::Error,
-    vm::{
-        dma::{dma_type, Daddr, DmaType},
-        HasPaddr, Paddr, VmIo, VmReader, VmSegment, VmWriter, PAGE_SIZE,
-    },
-};
+use crate::arch::tdx_guest::{protect_gpa_range, unprotect_gpa_range};
 
 /// A streaming DMA mapping. Users must synchronize data
 /// before reading or after writing to ensure consistency.
@@ -59,21 +57,12 @@ impl DmaStream {
         if !check_and_insert_dma_mapping(start_paddr, frame_count) {
             return Err(DmaError::AlreadyMapped);
         }
-        // Ensure that the addresses used later will not overflow
-        start_paddr.checked_add(frame_count * PAGE_SIZE).unwrap();
         let start_daddr = match dma_type() {
             DmaType::Direct => {
                 #[cfg(feature = "intel_tdx")]
-                // Safety:
-                // This is safe because we are ensuring that the physical address range specified by `start_paddr` and `frame_count` is valid before these operations.
-                // The `check_and_insert_dma_mapping` function checks if the physical address range is already mapped.
-                // We are also ensuring that we are only modifying the page table entries corresponding to the physical address range specified by `start_paddr` and `frame_count`.
-                // Therefore, we are not causing any undefined behavior or violating any of the requirements of the 'unprotect_gpa_range' function.
-                if tdx_is_enabled() {
-                    unsafe {
-                        tdx_guest::unprotect_gpa_range(start_paddr, frame_count).unwrap();
-                    }
-                }
+                unsafe {
+                    unprotect_gpa_range(start_paddr, frame_count).unwrap()
+                };
                 start_paddr as Daddr
             }
             DmaType::Iommu => {
@@ -153,21 +142,12 @@ impl Drop for DmaStreamInner {
     fn drop(&mut self) {
         let frame_count = self.vm_segment.nframes();
         let start_paddr = self.vm_segment.start_paddr();
-        // Ensure that the addresses used later will not overflow
-        start_paddr.checked_add(frame_count * PAGE_SIZE).unwrap();
         match dma_type() {
             DmaType::Direct => {
                 #[cfg(feature = "intel_tdx")]
-                // Safety:
-                // This is safe because we are ensuring that the physical address range specified by `start_paddr` and `frame_count` is valid before these operations.
-                // The `start_paddr()` ensures the `start_paddr` is page-aligned.
-                // We are also ensuring that we are only modifying the page table entries corresponding to the physical address range specified by `start_paddr` and `frame_count`.
-                // Therefore, we are not causing any undefined behavior or violating any of the requirements of the `protect_gpa_range` function.
-                if tdx_is_enabled() {
-                    unsafe {
-                        tdx_guest::protect_gpa_range(start_paddr, frame_count).unwrap();
-                    }
-                }
+                unsafe {
+                    protect_gpa_range(start_paddr, frame_count)
+                };
             }
             DmaType::Iommu => {
                 for i in 0..frame_count {
@@ -222,79 +202,11 @@ impl HasPaddr for DmaStream {
     }
 }
 
-/// A slice of streaming DMA mapping.
-#[derive(Debug)]
-pub struct DmaStreamSlice<'a> {
-    stream: &'a DmaStream,
-    offset: usize,
-    len: usize,
-}
-
-impl<'a> DmaStreamSlice<'a> {
-    /// Constructs a `DmaStreamSlice` from the `DmaStream`.
-    ///
-    /// # Panic
-    ///
-    /// If the `offset` is greater than or equal to the length of the stream,
-    /// this method will panic.
-    /// If the `offset + len` is greater than the length of the stream,
-    /// this method will panic.
-    pub fn new(stream: &'a DmaStream, offset: usize, len: usize) -> Self {
-        assert!(offset < stream.nbytes());
-        assert!(offset + len <= stream.nbytes());
-
-        Self {
-            stream,
-            offset,
-            len,
-        }
-    }
-
-    /// Returns the number of bytes.
-    pub fn nbytes(&self) -> usize {
-        self.len
-    }
-
-    /// Synchronizes the slice of streaming DMA mapping with the device.
-    pub fn sync(&self) -> Result<(), Error> {
-        self.stream.sync(self.offset..self.offset + self.len)
-    }
-}
-
-impl VmIo for DmaStreamSlice<'_> {
-    fn read_bytes(&self, offset: usize, buf: &mut [u8]) -> Result<(), Error> {
-        if buf.len() + offset > self.len {
-            return Err(Error::InvalidArgs);
-        }
-        self.stream.read_bytes(self.offset + offset, buf)
-    }
-
-    fn write_bytes(&self, offset: usize, buf: &[u8]) -> Result<(), Error> {
-        if buf.len() + offset > self.len {
-            return Err(Error::InvalidArgs);
-        }
-        self.stream.write_bytes(self.offset + offset, buf)
-    }
-}
-
-impl HasDaddr for DmaStreamSlice<'_> {
-    fn daddr(&self) -> Daddr {
-        self.stream.daddr() + self.offset
-    }
-}
-
-impl HasPaddr for DmaStreamSlice<'_> {
-    fn paddr(&self) -> Paddr {
-        self.stream.paddr() + self.offset
-    }
-}
-
-#[cfg(ktest)]
+#[if_cfg_ktest]
 mod test {
-    use alloc::vec;
-
     use super::*;
     use crate::vm::VmAllocOptions;
+    use alloc::vec;
 
     #[ktest]
     fn streaming_map() {

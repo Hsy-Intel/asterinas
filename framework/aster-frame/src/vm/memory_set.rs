@@ -1,20 +1,17 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use super::page_table::{PageTable, PageTableConfig, UserMode};
+use crate::{
+    arch::mm::{PageTableEntry, PageTableFlags},
+    config::{PAGE_SIZE, PHYS_OFFSET},
+    vm::is_page_aligned,
+    vm::{VmAllocOptions, VmFrame, VmFrameVec, VmReader, VmWriter},
+};
+use crate::{prelude::*, Error};
 use alloc::collections::{btree_map::Entry, BTreeMap};
 use core::fmt;
 
-use super::page_table::{PageTable, PageTableConfig, UserMode};
-use crate::{
-    arch::mm::{PageTableEntry, PageTableFlags, INIT_MAPPED_PTE},
-    prelude::*,
-    vm::{
-        is_page_aligned, VmAllocOptions, VmFrame, VmFrameVec, VmReader, VmWriter, PAGE_SIZE,
-        PHYS_MEM_BASE_VADDR,
-    },
-    Error,
-};
-
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct MapArea {
     pub flags: PageTableFlags,
     pub start_va: Vaddr,
@@ -26,6 +23,23 @@ pub struct MemorySet {
     pub pt: PageTable<PageTableEntry>,
     /// all the map area, sort by the start virtual address
     areas: BTreeMap<Vaddr, MapArea>,
+}
+
+impl Clone for MapArea {
+    fn clone(&self) -> Self {
+        let mut mapper = BTreeMap::new();
+        for (&va, old) in &self.mapper {
+            let new = VmAllocOptions::new(1).uninit(true).alloc_single().unwrap();
+            new.copy_from_frame(old);
+            mapper.insert(va, new.clone());
+        }
+        Self {
+            start_va: self.start_va,
+            size: self.size,
+            flags: self.flags,
+            mapper,
+        }
+    }
 }
 
 impl MapArea {
@@ -133,7 +147,7 @@ impl MemorySet {
             if let Entry::Vacant(e) = self.areas.entry(area.start_va) {
                 let area = e.insert(area);
                 for (va, frame) in area.mapper.iter() {
-                    debug_assert!(frame.start_paddr() < PHYS_MEM_BASE_VADDR);
+                    debug_assert!(frame.start_paddr() < PHYS_OFFSET);
                     self.pt.map(*va, frame, area.flags).unwrap();
                 }
             } else {
@@ -145,22 +159,24 @@ impl MemorySet {
         }
     }
 
-    /// Determine whether a Vaddr is in a mapped area
+    /// determine whether a Vaddr is in a mapped area
     pub fn is_mapped(&self, vaddr: Vaddr) -> bool {
-        self.pt.is_mapped(vaddr)
-    }
-
-    /// Return the flags of the PTE for the target virtual memory address.
-    /// If the PTE does not exist, return `None`.
-    pub fn flags(&self, vaddr: Vaddr) -> Option<PageTableFlags> {
-        self.pt.flags(vaddr)
+        for (start_address, map_area) in self.areas.iter() {
+            if *start_address > vaddr {
+                break;
+            }
+            if *start_address <= vaddr && vaddr < *start_address + map_area.mapped_size() {
+                return true;
+            }
+        }
+        false
     }
 
     pub fn new() -> Self {
         let mut page_table = PageTable::<PageTableEntry, UserMode>::new(PageTableConfig {
             address_width: super::page_table::AddressWidth::Level4,
         });
-        let mapped_pte = INIT_MAPPED_PTE.get().unwrap();
+        let mapped_pte = crate::arch::mm::ALL_MAPPED_PTE.lock();
         for (index, pte) in mapped_pte.iter() {
             // Safety: These PTEs are all valid PTEs fetched from the initial page table during memory initialization.
             unsafe {
@@ -244,11 +260,6 @@ impl MemorySet {
 
     pub fn protect(&mut self, addr: Vaddr, flags: PageTableFlags) {
         let va = addr;
-        // Temporary solution, since the `MapArea` currently only represents
-        // a single `VmFrame`.
-        if let Some(areas) = self.areas.get_mut(&va) {
-            areas.flags = flags;
-        }
         self.pt.protect(va, flags).unwrap();
     }
 }

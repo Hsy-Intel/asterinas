@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use crate::sync::Mutex;
 use alloc::{collections::BTreeMap, fmt};
-
 use pod::Pod;
-use spin::Once;
 use x86_64::{instructions::tlb, structures::paging::PhysFrame, VirtAddr};
 
-use crate::vm::{
-    page_table::{table_of, PageTableEntryTrait, PageTableFlagsTrait},
-    Paddr, Vaddr,
+use crate::{
+    config::ENTRY_COUNT,
+    vm::{
+        page_table::{table_of, PageTableEntryTrait, PageTableFlagsTrait},
+        Paddr, Vaddr,
+    },
 };
-
-pub(crate) const NR_ENTRIES_PER_PAGE: usize = 512;
 
 bitflags::bitflags! {
     #[derive(Pod)]
@@ -39,7 +39,6 @@ bitflags::bitflags! {
         /// the TLB on an address space switch.
         const GLOBAL =          1 << 8;
         /// TDX shared bit.
-        #[cfg(feature = "intel_tdx")]
         const SHARED =          1 << 51;
         /// Forbid execute codes on the page. The NXE bits in EFER msr must be set.
         const NO_EXECUTE =      1 << 63;
@@ -77,9 +76,9 @@ pub unsafe fn activate_page_table(root_paddr: Paddr, flags: x86_64::registers::c
     );
 }
 
-pub(crate) static INIT_MAPPED_PTE: Once<BTreeMap<usize, PageTableEntry>> = Once::new();
+pub static ALL_MAPPED_PTE: Mutex<BTreeMap<usize, PageTableEntry>> = Mutex::new(BTreeMap::new());
 
-pub(crate) fn init() {
+pub fn init() {
     let (page_directory_base, _) = x86_64::registers::control::Cr3::read();
     let page_directory_base = page_directory_base.start_address().as_u64() as usize;
 
@@ -87,15 +86,12 @@ pub(crate) fn init() {
     let p4 = unsafe { table_of::<PageTableEntry>(page_directory_base).unwrap() };
     // Cancel mapping in lowest addresses.
     p4[0].clear();
-    INIT_MAPPED_PTE.call_once(|| {
-        let mut mapped_pte = BTreeMap::new();
-        for (i, p4_i) in p4.iter().enumerate().take(512) {
-            if p4_i.flags().contains(PageTableFlags::PRESENT) {
-                mapped_pte.insert(i, *p4_i);
-            }
+    let mut map_pte = ALL_MAPPED_PTE.lock();
+    for (i, p4_i) in p4.iter().enumerate().take(512) {
+        if p4_i.flags().contains(PageTableFlags::PRESENT) {
+            map_pte.insert(i, *p4_i);
         }
-        mapped_pte
-    });
+    }
 }
 
 impl PageTableFlagsTrait for PageTableFlags {
@@ -180,10 +176,6 @@ impl PageTableFlagsTrait for PageTableFlags {
 }
 
 impl PageTableEntry {
-    /// 51:12
-    #[cfg(not(feature = "intel_tdx"))]
-    const PHYS_ADDR_MASK: usize = 0xF_FFFF_FFFF_F000;
-    #[cfg(feature = "intel_tdx")]
     const PHYS_ADDR_MASK: usize = 0x7_FFFF_FFFF_F000;
 }
 
@@ -212,7 +204,7 @@ impl PageTableEntryTrait for PageTableEntry {
 
     fn page_index(va: crate::vm::Vaddr, level: usize) -> usize {
         debug_assert!((1..=5).contains(&level));
-        va >> (12 + 9 * (level - 1)) & (NR_ENTRIES_PER_PAGE - 1)
+        va >> (12 + 9 * (level - 1)) & (ENTRY_COUNT - 1)
     }
 }
 

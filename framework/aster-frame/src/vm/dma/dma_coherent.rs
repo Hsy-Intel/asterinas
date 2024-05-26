@@ -3,21 +3,17 @@
 use alloc::sync::Arc;
 use core::ops::Deref;
 
-#[cfg(feature = "intel_tdx")]
-use ::tdx_guest::tdx_is_enabled;
+use crate::arch::{iommu, mm::PageTableFlags};
+use crate::vm::{
+    dma::{dma_type, Daddr, DmaType},
+    paddr_to_vaddr,
+    page_table::KERNEL_PAGE_TABLE,
+    HasPaddr, Paddr, VmIo, VmReader, VmSegment, VmWriter, PAGE_SIZE,
+};
 
 use super::{check_and_insert_dma_mapping, remove_dma_mapping, DmaError, HasDaddr};
 #[cfg(feature = "intel_tdx")]
-use crate::arch::tdx_guest;
-use crate::{
-    arch::{iommu, mm::PageTableFlags},
-    vm::{
-        dma::{dma_type, Daddr, DmaType},
-        paddr_to_vaddr,
-        page_table::KERNEL_PAGE_TABLE,
-        HasPaddr, Paddr, VmIo, VmReader, VmSegment, VmWriter, PAGE_SIZE,
-    },
-};
+use crate::arch::tdx_guest::{protect_gpa_range, unprotect_gpa_range};
 
 /// A coherent (or consistent) DMA mapping,
 /// which guarantees that the device and the CPU can
@@ -53,8 +49,6 @@ impl DmaCoherent {
         if !check_and_insert_dma_mapping(start_paddr, frame_count) {
             return Err(DmaError::AlreadyMapped);
         }
-        // Ensure that the addresses used later will not overflow
-        start_paddr.checked_add(frame_count * PAGE_SIZE).unwrap();
         if !is_cache_coherent {
             let mut page_table = KERNEL_PAGE_TABLE.get().unwrap().lock();
             for i in 0..frame_count {
@@ -72,16 +66,9 @@ impl DmaCoherent {
         let start_daddr = match dma_type() {
             DmaType::Direct => {
                 #[cfg(feature = "intel_tdx")]
-                // Safety:
-                // This is safe because we are ensuring that the physical address range specified by `start_paddr` and `frame_count` is valid before these operations.
-                // The `check_and_insert_dma_mapping` function checks if the physical address range is already mapped.
-                // We are also ensuring that we are only modifying the page table entries corresponding to the physical address range specified by `start_paddr` and `frame_count`.
-                // Therefore, we are not causing any undefined behavior or violating any of the requirements of the 'unprotect_gpa_range' function.
-                if tdx_is_enabled() {
-                    unsafe {
-                        tdx_guest::unprotect_gpa_range(start_paddr, frame_count).unwrap();
-                    }
-                }
+                unsafe {
+                    unprotect_gpa_range(start_paddr, frame_count).unwrap()
+                };
                 start_paddr as Daddr
             }
             DmaType::Iommu => {
@@ -122,21 +109,12 @@ impl Drop for DmaCoherentInner {
     fn drop(&mut self) {
         let frame_count = self.vm_segment.nframes();
         let start_paddr = self.vm_segment.start_paddr();
-        // Ensure that the addresses used later will not overflow
-        start_paddr.checked_add(frame_count * PAGE_SIZE).unwrap();
         match dma_type() {
             DmaType::Direct => {
                 #[cfg(feature = "intel_tdx")]
-                // Safety:
-                // This is safe because we are ensuring that the physical address range specified by `start_paddr` and `frame_count` is valid before these operations.
-                // The `start_paddr()` ensures the `start_paddr` is page-aligned.
-                // We are also ensuring that we are only modifying the page table entries corresponding to the physical address range specified by `start_paddr` and `frame_count`.
-                // Therefore, we are not causing any undefined behavior or violating any of the requirements of the `protect_gpa_range` function.
-                if tdx_is_enabled() {
-                    unsafe {
-                        tdx_guest::protect_gpa_range(start_paddr, frame_count).unwrap();
-                    }
-                }
+                unsafe {
+                    protect_gpa_range(start_paddr, frame_count)
+                };
             }
             DmaType::Iommu => {
                 for i in 0..frame_count {
@@ -190,12 +168,11 @@ impl HasPaddr for DmaCoherent {
     }
 }
 
-#[cfg(ktest)]
+#[if_cfg_ktest]
 mod test {
-    use alloc::vec;
-
     use super::*;
     use crate::vm::VmAllocOptions;
+    use alloc::vec;
 
     #[ktest]
     fn map_with_coherent_device() {

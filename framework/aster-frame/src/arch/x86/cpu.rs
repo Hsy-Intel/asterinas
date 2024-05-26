@@ -2,29 +2,24 @@
 
 //! CPU.
 
-use alloc::vec::Vec;
-use core::{
-    arch::x86_64::{_fxrstor, _fxsave},
-    fmt::Debug,
-};
+use core::arch::x86_64::{_fxrstor, _fxsave};
+use core::fmt::Debug;
 
+use alloc::vec::Vec;
 use bitflags::bitflags;
-use bitvec::{
-    prelude::{BitVec, Lsb0},
-    slice::IterOnes,
-};
-use log::debug;
-#[cfg(feature = "intel_tdx")]
-use tdx_guest::tdcall;
+use bitvec::{prelude::Lsb0, slice::IterOnes};
 use trapframe::{GeneralRegs, UserContext as RawUserContext};
-use x86_64::registers::rflags::RFlags;
 
 #[cfg(feature = "intel_tdx")]
 use crate::arch::tdx_guest::{handle_virtual_exception, TdxTrapFrame};
-use crate::{
-    trap::call_irq_callback_functions,
-    user::{UserContextApi, UserContextApiInternal, UserEvent},
-};
+use bitvec::prelude::BitVec;
+use log::debug;
+#[cfg(feature = "intel_tdx")]
+use tdx_guest::tdcall;
+use x86_64::registers::rflags::RFlags;
+
+use crate::trap::call_irq_callback_functions;
+use crate::user::{UserContextApi, UserContextApiInternal, UserEvent};
 
 /// Returns the number of CPUs.
 pub fn num_cpus() -> u32 {
@@ -212,28 +207,6 @@ impl TdxTrapFrame for GeneralRegs {
     }
 }
 
-pub struct UserPreemption {
-    count: u32,
-}
-
-impl UserPreemption {
-    const PREEMPTION_INTERVAL: u32 = 100;
-
-    pub const fn new() -> Self {
-        UserPreemption { count: 0 }
-    }
-
-    pub fn might_preempt(&mut self) {
-        self.count = (self.count + 1) % Self::PREEMPTION_INTERVAL;
-
-        if self.count == 0 {
-            crate::arch::irq::enable_local();
-            crate::task::schedule();
-            crate::arch::irq::disable_local();
-        }
-    }
-}
-
 impl UserContext {
     pub fn general_regs(&self) -> &GeneralRegs {
         &self.user_context.general
@@ -263,8 +236,6 @@ impl UserContextApiInternal for UserContext {
         self.user_context.general.rflags |= (RFlags::INTERRUPT_FLAG | RFlags::ID).bits() as usize;
 
         const SYSCALL_TRAPNUM: u16 = 0x100;
-
-        let mut user_preemption = UserPreemption::new();
         // return when it is syscall or cpu exception type is Fault or Trap.
         loop {
             self.user_context.run();
@@ -291,8 +262,6 @@ impl UserContextApiInternal for UserContext {
                 }
             };
             call_irq_callback_functions(&self.as_trap_frame());
-
-            user_preemption.might_preempt();
         }
 
         crate::arch::irq::enable_local();
@@ -336,7 +305,7 @@ impl UserContextApiInternal for UserContext {
     }
 }
 
-/// As Osdev Wiki defines(<https://wiki.osdev.org/Exceptions>):
+/// As Osdev Wiki defines(https://wiki.osdev.org/Exceptions):
 /// CPU exceptions are classified as:
 ///
 /// Faults: These can be corrected and the program may continue as if nothing happened.
@@ -427,7 +396,7 @@ define_cpu_exception!(
 
 bitflags! {
     /// Page Fault error code. Following the Intel Architectures Software Developer's Manual Volume 3
-    pub struct PageFaultErrorCode : usize{
+    pub struct PageFaultErrorCode : usize {
         /// 0 if no translation for the linear address.
         const PRESENT       = 1 << 0;
         /// 1 if the access was a write.
@@ -446,7 +415,7 @@ bitflags! {
         const SHADOW_STACK  = 1 << 6;
         /// 1 if there is no translation for the linear address using HLAT paging.
         const HLAT          = 1 << 7;
-        /// 1 if the exception is unrelated to paging and resulted from violation of SGX-specific
+        /// 1 if the exception is unrelated to paging and resultedfrom violation of SGX-specific
         /// access-control requirements.
         const SGX           = 1 << 15;
     }

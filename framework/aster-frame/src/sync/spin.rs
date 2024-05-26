@@ -1,34 +1,29 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use core::{
-    cell::UnsafeCell,
-    fmt,
-    ops::{Deref, DerefMut},
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::cell::UnsafeCell;
+use core::fmt;
+use core::ops::{Deref, DerefMut};
+use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::{
-    task::{disable_preempt, DisablePreemptGuard},
-    trap::{disable_local, DisabledLocalIrqGuard},
-};
+use crate::task::{disable_preempt, DisablePreemptGuard};
+use crate::trap::disable_local;
+use crate::trap::DisabledLocalIrqGuard;
 
 /// A spin lock.
-pub struct SpinLock<T: ?Sized> {
-    lock: AtomicBool,
+pub struct SpinLock<T> {
     val: UnsafeCell<T>,
+    lock: AtomicBool,
 }
 
 impl<T> SpinLock<T> {
     /// Creates a new spin lock.
     pub const fn new(val: T) -> Self {
         Self {
-            lock: AtomicBool::new(false),
             val: UnsafeCell::new(val),
+            lock: AtomicBool::new(false),
         }
     }
-}
 
-impl<T: ?Sized> SpinLock<T> {
     /// Acquire the spin lock with disabling the local IRQs. This is the most secure
     /// locking way.
     ///
@@ -104,15 +99,15 @@ impl<T: ?Sized> SpinLock<T> {
     }
 }
 
-impl<T: ?Sized + fmt::Debug> fmt::Debug for SpinLock<T> {
+impl<T: fmt::Debug> fmt::Debug for SpinLock<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Debug::fmt(&self.val, f)
     }
 }
 
 // Safety. Only a single lock holder is permitted to access the inner data of Spinlock.
-unsafe impl<T: ?Sized + Send> Send for SpinLock<T> {}
-unsafe impl<T: ?Sized + Send> Sync for SpinLock<T> {}
+unsafe impl<T: Send> Send for SpinLock<T> {}
+unsafe impl<T: Send> Sync for SpinLock<T> {}
 
 enum InnerGuard {
     IrqGuard(DisabledLocalIrqGuard),
@@ -120,12 +115,12 @@ enum InnerGuard {
 }
 
 /// The guard of a spin lock that disables the local IRQs.
-pub struct SpinLockGuard<'a, T: ?Sized> {
-    inner_guard: InnerGuard,
+pub struct SpinLockGuard<'a, T> {
     lock: &'a SpinLock<T>,
+    inner_guard: InnerGuard,
 }
 
-impl<'a, T: ?Sized> Deref for SpinLockGuard<'a, T> {
+impl<'a, T> Deref for SpinLockGuard<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -133,26 +128,26 @@ impl<'a, T: ?Sized> Deref for SpinLockGuard<'a, T> {
     }
 }
 
-impl<'a, T: ?Sized> DerefMut for SpinLockGuard<'a, T> {
+impl<'a, T> DerefMut for SpinLockGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { &mut *self.lock.val.get() }
     }
 }
 
-impl<'a, T: ?Sized> Drop for SpinLockGuard<'a, T> {
+impl<'a, T> Drop for SpinLockGuard<'a, T> {
     fn drop(&mut self) {
         self.lock.release_lock();
     }
 }
 
-impl<'a, T: ?Sized + fmt::Debug> fmt::Debug for SpinLockGuard<'a, T> {
+impl<'a, T: fmt::Debug> fmt::Debug for SpinLockGuard<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Debug::fmt(&**self, f)
     }
 }
 
-impl<'a, T: ?Sized> !Send for SpinLockGuard<'a, T> {}
+impl<'a, T> !Send for SpinLockGuard<'a, T> {}
 
 // Safety. `SpinLockGuard` can be shared between tasks/threads in same CPU.
 // As `lock()` is only called when there are no race conditions caused by interrupts.
-unsafe impl<T: ?Sized + Sync> Sync for SpinLockGuard<'_, T> {}
+unsafe impl<T: Sync> Sync for SpinLockGuard<'_, T> {}

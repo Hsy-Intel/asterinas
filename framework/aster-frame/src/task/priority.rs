@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-pub const REAL_TIME_TASK_PRIORITY: u16 = 100;
+use crate::config::REAL_TIME_TASK_PRI;
 
 /// The priority of a task.
 /// Similar to Linux, a larger value represents a lower priority,
@@ -44,6 +44,6 @@ impl Priority {
     }
 
     pub const fn is_real_time(&self) -> bool {
-        self.0 < REAL_TIME_TASK_PRIORITY
+        self.0 < REAL_TIME_TASK_PRI
     }
 }

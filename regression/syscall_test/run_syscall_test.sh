@@ -18,18 +18,11 @@ NC='\033[0m'
 get_blocklist_subtests(){
     if [ -f $BLOCKLIST_DIR/$1 ]; then
         BLOCK=$(sed ':a;N;$!ba;s/\n/:/g' $BLOCKLIST_DIR/$1)
+        return 0
     else
         BLOCK=""
         return 1
     fi
-
-    for extra_dir in $EXTRA_BLOCKLISTS_DIRS ; do
-        if [ -f $SCRIPT_DIR/$extra_dir/$1 ]; then
-            BLOCK="${BLOCK}:$(sed ':a;N;$!ba;s/\n/:/g' $SCRIPT_DIR/$extra_dir/$1)"
-        fi
-    done
-
-    return 0
 }
 
 run_one_test(){
@@ -38,11 +31,10 @@ run_one_test(){
     export TEST_TMPDIR=$TEST_TMP_DIR
     ret=0
     if [ -f $TEST_BIN_DIR/$1 ]; then
+        rm -rf $TEST_TMP_DIR/*
         get_blocklist_subtests $1
         $TEST_BIN_DIR/$1 --gtest_filter=-$BLOCK
         ret=$?
-        #After executing the test, it is necessary to clean the directory to ensure no residual data remains
-        rm -rf $TEST_TMP_DIR/*
     else
         echo -e "Warning: $1 test does not exit"
         ret=1
@@ -52,7 +44,6 @@ run_one_test(){
 }
 
 rm -f $FAIL_CASES && touch $FAIL_CASES
-rm -rf $TEST_TMP_DIR/*
 
 for syscall_test in $(find $TEST_BIN_DIR/. -name \*_test) ; do
     test_name=$(basename "$syscall_test")
@@ -65,10 +56,10 @@ for syscall_test in $(find $TEST_BIN_DIR/. -name \*_test) ; do
     fi
 done
 
-echo -e "$GREEN$PASSED_TESTS$NC of $GREEN$TESTS$NC test cases passed."
+echo -e "$GREEN$PASSED_TESTS$NC of $GREEN$TESTS$NC test cases are passed."
 [ $PASSED_TESTS -ne $TESTS ] && RESULT=1
 if [ $TESTS != $PASSED_TESTS ]; then
-    echo -e "The $RED$(($TESTS-$PASSED_TESTS))$NC failed test cases are as follows:"
+    echo -e "The $RED$(($TESTS-$PASSED_TESTS))$NC failed test cases in this run are as follows:"
     cat $FAIL_CASES
 fi
 

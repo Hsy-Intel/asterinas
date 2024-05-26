@@ -4,13 +4,14 @@ mod dma_coherent;
 mod dma_stream;
 
 use alloc::collections::BTreeSet;
-
-pub use dma_coherent::DmaCoherent;
-pub use dma_stream::{DmaDirection, DmaStream, DmaStreamSlice};
 use spin::Once;
 
+use crate::{arch::iommu::has_iommu, config::PAGE_SIZE, sync::SpinLock};
+
 use super::Paddr;
-use crate::{arch::iommu::has_iommu, sync::SpinLock, vm::PAGE_SIZE};
+
+pub use dma_coherent::DmaCoherent;
+pub use dma_stream::{DmaDirection, DmaStream};
 
 /// If a device performs DMA to read or write system
 /// memory, the addresses used by the device are device addresses.
@@ -55,8 +56,6 @@ pub fn init() {
 /// Fail if they have been mapped, otherwise insert them.
 fn check_and_insert_dma_mapping(start_paddr: Paddr, num_pages: usize) -> bool {
     let mut mapping_set = DMA_MAPPING_SET.get().unwrap().lock_irq_disabled();
-    // Ensure that the addresses used later will not overflow
-    start_paddr.checked_add(num_pages * PAGE_SIZE).unwrap();
     for i in 0..num_pages {
         let paddr = start_paddr + (i * PAGE_SIZE);
         if mapping_set.contains(&paddr) {
@@ -73,8 +72,6 @@ fn check_and_insert_dma_mapping(start_paddr: Paddr, num_pages: usize) -> bool {
 /// Remove a physical address from the dma mapping set.
 fn remove_dma_mapping(start_paddr: Paddr, num_pages: usize) {
     let mut mapping_set = DMA_MAPPING_SET.get().unwrap().lock_irq_disabled();
-    // Ensure that the addresses used later will not overflow
-    start_paddr.checked_add(num_pages * PAGE_SIZE).unwrap();
     for i in 0..num_pages {
         let paddr = start_paddr + (i * PAGE_SIZE);
         mapping_set.remove(&paddr);

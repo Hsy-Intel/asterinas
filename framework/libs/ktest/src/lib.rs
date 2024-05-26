@@ -21,8 +21,8 @@
 //! module, e.g.:
 //!
 //! ```rust
-//! use ktest::ktest;
-//! #[cfg(ktest)]
+//! use ktest::{ktest, if_cfg_ktest};
+//! #[if_cfg_ktest]
 //! mod test {
 //!     #[ktest]
 //!     fn trivial_assertion() {
@@ -95,8 +95,9 @@ pub mod tree;
 
 extern crate alloc;
 use alloc::{boxed::Box, string::String};
+use core::result::Result;
 
-pub use ktest_proc_macro::ktest;
+pub use ktest_proc_macro::{if_cfg_ktest, ktest};
 
 #[derive(Clone, Debug)]
 pub struct PanicInfo {
@@ -219,7 +220,9 @@ impl core::iter::Iterator for KtestIter {
     type Item = KtestItem;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let ktest_item = ktest_array!().get(self.index)?;
+        let Some(ktest_item) = ktest_array!().get(self.index) else {
+            return None;
+        };
         self.index += 1;
         Some(ktest_item.clone())
     }

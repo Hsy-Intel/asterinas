@@ -25,23 +25,12 @@ impl X2Apic {
     }
 
     pub fn enable(&mut self) {
-        const X2APIC_ENABLE_BITS: u64 = {
-            // IA32_APIC_BASE MSR's EN bit: xAPIC global enable/disable
-            const EN_BIT_IDX: u8 = 11;
-            // IA32_APIC_BASE MSR's EXTD bit: Enable x2APIC mode
-            const EXTD_BIT_IDX: u8 = 10;
-            (1 << EN_BIT_IDX) | (1 << EXTD_BIT_IDX)
-        };
-        // Safety:
-        // This is safe because we are ensuring that the operations are performed on valid MSRs.
-        // We are using them to read and write to the `IA32_APIC_BASE` and `IA32_X2APIC_SIVR` MSRs, which are well-defined and valid MSRs in x86 systems.
-        // Therefore, we are not causing any undefined behavior or violating any of the requirements of the `rdmsr` and `wrmsr` functions.
+        // Enable
         unsafe {
             // Enable x2APIC mode globally
             let mut base = rdmsr(IA32_APIC_BASE);
-            // Enable x2APIC and xAPIC if they are not enabled by default
-            if base & X2APIC_ENABLE_BITS != X2APIC_ENABLE_BITS {
-                base |= X2APIC_ENABLE_BITS;
+            if base & 0b1100_0000_0000 != 0b1100_0000_0000 {
+                base |= 0b1100_0000_0000; // Enable x2APIC and xAPIC
                 wrmsr(IA32_APIC_BASE, base);
             }
 

@@ -1,16 +1,20 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use alloc::sync::Arc;
-use core::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+use core::sync::atomic::AtomicUsize;
 
-use lazy_static::lazy_static;
+use crate::cpu_local;
+use crate::sync::Mutex;
+use crate::{cpu::CpuLocal, trap::disable_local};
+
+use core::sync::atomic::Ordering::Relaxed;
 
 use super::{
     scheduler::{fetch_task, GLOBAL_SCHEDULER},
     task::{context_switch, TaskContext},
     Task, TaskStatus,
 };
-use crate::{cpu_local, sync::Mutex};
+use alloc::sync::Arc;
+use lazy_static::lazy_static;
 
 pub struct Processor {
     current: Option<Arc<Task>>,
@@ -62,8 +66,8 @@ pub fn schedule() {
 }
 
 pub fn preempt() {
-    // TODO: Refactor `preempt` and `schedule`
-    // after the Atomic mode and `might_break` is enabled.
+    // disable interrupts to avoid nested preemption.
+    let disable_irq = disable_local();
     let Some(curr_task) = current_task() else {
         return;
     };
@@ -91,33 +95,26 @@ fn switch_to_task(next_task: Arc<Task>) {
             "Calling schedule() while holding {} locks",
             PREEMPT_COUNT.num_locks()
         );
+        //GLOBAL_SCHEDULER.lock_irq_disabled().enqueue(next_task);
+        //return;
     }
-
-    let current_task_cx_ptr = match current_task() {
+    let current_task_option = current_task();
+    let next_task_cx_ptr = &next_task.inner_ctx() as *const TaskContext;
+    let current_task: Arc<Task>;
+    let current_task_cx_ptr = match current_task_option {
         None => PROCESSOR.lock().get_idle_task_cx_ptr(),
         Some(current_task) => {
-            let mut task = current_task.inner_exclusive_access();
-
-            // FIXME: `task.ctx` should be put in a separate `UnsafeCell`, not as a part of
-            // `TaskInner`. Otherwise, it violates the sematics of `SpinLock` and Rust's memory
-            // model which requires that mutable references must be exclusive.
-            let cx_ptr = &mut task.ctx as *mut TaskContext;
-
-            debug_assert_ne!(task.task_status, TaskStatus::Sleeping);
-            if task.task_status == TaskStatus::Runnable {
-                drop(task);
-                GLOBAL_SCHEDULER.lock_irq_disabled().enqueue(current_task);
-            } else if task.task_status == TaskStatus::Sleepy {
-                task.task_status = TaskStatus::Sleeping;
+            if current_task.status() == TaskStatus::Runnable {
+                GLOBAL_SCHEDULER
+                    .lock_irq_disabled()
+                    .enqueue(current_task.clone());
             }
-
-            cx_ptr
+            &mut current_task.inner_exclusive_access().ctx as *mut TaskContext
         }
     };
 
-    let next_task_cx_ptr = &next_task.inner_ctx() as *const TaskContext;
-
     // change the current task to the next task
+
     PROCESSOR.lock().current = Some(next_task.clone());
     unsafe {
         context_switch(current_task_cx_ptr, next_task_cx_ptr);

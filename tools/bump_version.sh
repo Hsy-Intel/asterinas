@@ -20,7 +20,6 @@ update_image_versions() {
 SCRIPT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 ASTER_SRC_DIR=${SCRIPT_DIR}/..
 CARGO_TOML_PATH=${ASTER_SRC_DIR}/Cargo.toml
-OSDK_CARGO_TOML_PATH=${ASTER_SRC_DIR}/osdk/Cargo.toml
 VERSION_PATH=${ASTER_SRC_DIR}/VERSION
 
 # Get and check the new version number
@@ -33,7 +32,6 @@ fi
 
 # Update Cargo.toml
 update_cargo_versions ${CARGO_TOML_PATH}
-update_cargo_versions ${OSDK_CARGO_TOML_PATH}
 
 # Automatically bump Cargo.lock file
 cargo update -p asterinas --precise $new_version
@@ -52,4 +50,4 @@ done
 # Create or update VERSION
 echo "${new_version}" > ${VERSION_PATH}
 
-echo "Bumped Asterinas & OSDK version to $new_version"
+echo "Bumped Asterinas version to $new_version"

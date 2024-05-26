@@ -3,16 +3,16 @@
 //! Test runner enabling control over the tests.
 //!
 
-use alloc::{collections::BTreeSet, string::String, vec::Vec};
-use core::format_args;
-
-use owo_colors::OwoColorize;
-
 use crate::{
     path::{KtestPath, SuffixTrie},
     tree::{KtestCrate, KtestTree},
     CatchUnwindImpl, KtestError, KtestItem, KtestIter,
 };
+
+use alloc::{string::String, vec::Vec};
+use core::format_args;
+
+use owo_colors::OwoColorize;
 
 pub enum KtestResult {
     Ok,
@@ -35,8 +35,7 @@ pub enum KtestResult {
 pub fn run_ktests<PrintFn, PathsIter>(
     print: &PrintFn,
     catch_unwind: &CatchUnwindImpl,
-    test_whitelist: Option<PathsIter>,
-    crate_whitelist: Option<&[&str]>,
+    whitelist: Option<PathsIter>,
 ) -> KtestResult
 where
     PrintFn: Fn(core::fmt::Arguments),
@@ -49,7 +48,7 @@ where
     }
 
     let whitelist_trie =
-        test_whitelist.map(|paths| SuffixTrie::from_paths(paths.map(|p| KtestPath::from(&p))));
+        whitelist.map(|paths| SuffixTrie::from_paths(paths.map(|p| KtestPath::from(&p))));
 
     let tree = KtestTree::from_iter(KtestIter::new());
     print!(
@@ -57,15 +56,7 @@ where
         tree.nr_tot_tests(),
         tree.nr_tot_crates()
     );
-    let crate_set =
-        crate_whitelist.map(|crates| crates.iter().copied().collect::<BTreeSet<&str>>());
     for crate_ in tree.iter() {
-        if let Some(crate_set) = &crate_set {
-            if !crate_set.contains(crate_.name()) {
-                print!("\n[ktest runner] skipping crate \"{}\".\n", crate_.name());
-                continue;
-            }
-        }
         match run_crate_ktests(crate_, print, catch_unwind, &whitelist_trie) {
             KtestResult::Ok => {}
             KtestResult::Failed => return KtestResult::Failed,

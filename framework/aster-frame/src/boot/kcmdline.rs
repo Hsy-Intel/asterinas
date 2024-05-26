@@ -5,7 +5,7 @@
 //! The format of the Asterinas command line string conforms
 //! to the Linux kernel command line rules:
 //!
-//! <https://www.kernel.org/doc/html/v6.4/admin-guide/kernel-parameters.html>
+//! https://www.kernel.org/doc/html/v6.4/admin-guide/kernel-parameters.html
 //!
 
 use alloc::{
@@ -15,7 +15,6 @@ use alloc::{
     vec,
     vec::Vec,
 };
-
 use log::warn;
 
 #[derive(PartialEq, Debug)]
@@ -91,6 +90,11 @@ impl From<&str> for KCmdlineArg {
         // The main parse loop. The processing steps are arranged (not very strictly)
         // by the analysis over the Backus–Naur form syntax tree.
         for arg in split_arg(cmdline) {
+            // FIXME: The -kernel option in QEMU seems to add this string to the command line, which we skip for now.
+            if arg.starts_with("target/x86_64-custom/") {
+                warn!("Found kcmdline: {:?}, skipped for now.", arg);
+                continue;
+            }
             // Cmdline => KernelArg "--" InitArg
             // KernelArg => Arg "\s+" KernelArg | %empty
             // InitArg => Arg "\s+" InitArg | %empty
@@ -111,8 +115,7 @@ impl From<&str> for KCmdlineArg {
                 1 => (arg_pattern[0], None),
                 2 => (arg_pattern[0], Some(arg_pattern[1])),
                 _ => {
-                    warn!("Unable to parse kernel argument {}, skip for now", arg);
-                    continue;
+                    panic!("Unable to parse argument {}", arg);
                 }
             };
             // Entry => Module "." ModuleOptionName | KernelOptionName
@@ -121,11 +124,7 @@ impl From<&str> for KCmdlineArg {
                 1 => (None, entry_pattern[0]),
                 2 => (Some(entry_pattern[0]), entry_pattern[1]),
                 _ => {
-                    warn!(
-                        "Unable to parse entry {} in argument {}, skip for now",
-                        entry, arg
-                    );
-                    continue;
+                    panic!("Unable to parse entry {} in argument {}", entry, arg);
                 }
             };
             if let Some(modname) = node {

@@ -9,7 +9,7 @@
 //!
 //! Use case:
 //!
-//! ```rust no_run
+//! ```rust norun
 //! #[derive(Debug)]
 //! pub struct PciDeviceA {
 //!     common_device: PciCommonDevice,
@@ -56,10 +56,10 @@ pub mod cfg_space;
 pub mod common_device;
 mod device_info;
 
+use crate::sync::Mutex;
 pub use device_info::{PciDeviceId, PciDeviceLocation};
 
 use self::{bus::PciBus, common_device::PciCommonDevice};
-use crate::sync::Mutex;
 
 pub static PCI_BUS: Mutex<PciBus> = Mutex::new(PciBus::new());
 

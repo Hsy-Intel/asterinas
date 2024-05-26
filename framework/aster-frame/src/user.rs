@@ -2,9 +2,11 @@
 
 //! User space.
 
+use crate::cpu::UserContext;
+use crate::prelude::*;
+use crate::task::Task;
+use crate::vm::VmSpace;
 use trapframe::TrapFrame;
-
-use crate::{cpu::UserContext, prelude::*, task::Task, vm::VmSpace};
 
 /// A user space.
 ///

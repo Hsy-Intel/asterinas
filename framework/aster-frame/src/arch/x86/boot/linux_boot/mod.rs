@@ -3,20 +3,19 @@
 //! The Linux 64-bit Boot Protocol supporting module.
 //!
 
+use linux_boot_params::{BootParams, E820Type, LINUX_BOOT_HEADER_MAGIC};
+
+use crate::boot::{
+    kcmdline::KCmdlineArg,
+    memory_region::{non_overlapping_regions_from, MemoryRegion, MemoryRegionType},
+    BootloaderAcpiArg, BootloaderFramebufferArg,
+};
+use crate::{config::PHYS_OFFSET, vm::paddr_to_vaddr};
+
 use alloc::{borrow::ToOwned, format, string::String, vec::Vec};
 use core::ffi::CStr;
 
-use linux_boot_params::{BootParams, E820Type, LINUX_BOOT_HEADER_MAGIC};
 use spin::Once;
-
-use crate::{
-    boot::{
-        kcmdline::KCmdlineArg,
-        memory_region::{non_overlapping_regions_from, MemoryRegion, MemoryRegionType},
-        BootloaderAcpiArg, BootloaderFramebufferArg,
-    },
-    vm::{paddr_to_vaddr, PHYS_MEM_BASE_VADDR},
-};
 
 static BOOT_PARAMS: Once<BootParams> = Once::new();
 
@@ -69,19 +68,13 @@ fn init_kernel_commandline(kernel_cmdline: &'static Once<KCmdlineArg>) {
 fn init_initramfs(initramfs: &'static Once<&'static [u8]>) {
     let hdr = &BOOT_PARAMS.get().unwrap().hdr;
     let ptr = hdr.ramdisk_image as usize;
-    if ptr == 0 {
-        return;
-    }
     // We must return a slice composed by VA since kernel should read everything in VA.
-    let base_va = if ptr < PHYS_MEM_BASE_VADDR {
+    let base_va = if ptr < PHYS_OFFSET {
         paddr_to_vaddr(ptr)
     } else {
         ptr
     };
     let length = hdr.ramdisk_size as usize;
-    if length == 0 {
-        return;
-    }
     initramfs.call_once(|| unsafe { core::slice::from_raw_parts(base_va as *const u8, length) });
 }
 

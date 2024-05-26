@@ -262,9 +262,9 @@ const EDDMAXNR: usize = 6;
 
 #[cfg(test)]
 mod tests {
-    use core::mem::offset_of;
-
     use super::*;
+
+    use core::mem::offset_of;
 
     #[test]
     fn test_screen_info_offsets() {

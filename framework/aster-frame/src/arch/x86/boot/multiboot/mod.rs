@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use alloc::{string::String, vec::Vec};
-use core::arch::global_asm;
-
 use multiboot2::MemoryAreaType;
 use spin::Once;
 
@@ -12,8 +10,11 @@ use crate::{
         memory_region::{non_overlapping_regions_from, MemoryRegion, MemoryRegionType},
         BootloaderAcpiArg, BootloaderFramebufferArg,
     },
-    vm::{paddr_to_vaddr, PHYS_MEM_BASE_VADDR},
+    config::PHYS_OFFSET,
+    vm::paddr_to_vaddr,
 };
+
+use core::arch::global_asm;
 
 global_asm!(include_str!("header.S"));
 
@@ -76,7 +77,7 @@ fn init_initramfs(initramfs: &'static Once<&'static [u8]>) {
         )
     };
     // We must return a slice composed by VA since kernel should read every in VA.
-    let base_va = if start < PHYS_MEM_BASE_VADDR {
+    let base_va = if start < PHYS_OFFSET {
         paddr_to_vaddr(start)
     } else {
         start

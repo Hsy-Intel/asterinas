@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use core::{mem::size_of, ops::Range};
-
 use pod::Pod;
 
 use crate::{
@@ -79,17 +78,11 @@ impl IoMem {
 
     pub fn resize(&mut self, range: Range<Paddr>) -> Result<()> {
         let start_vaddr = paddr_to_vaddr(range.start);
-        let virtual_end = self
-            .virtual_address
-            .checked_add(self.limit)
-            .ok_or(Error::Overflow)?;
-        if start_vaddr < self.virtual_address || start_vaddr >= virtual_end {
+        if start_vaddr < self.virtual_address || start_vaddr >= self.virtual_address + self.limit {
             return Err(Error::InvalidArgs);
         }
-        let end_vaddr = start_vaddr
-            .checked_add(range.len())
-            .ok_or(Error::Overflow)?;
-        if end_vaddr <= self.virtual_address || end_vaddr > virtual_end {
+        let end_vaddr = start_vaddr + range.len();
+        if end_vaddr <= self.virtual_address || end_vaddr > self.virtual_address + self.limit {
             return Err(Error::InvalidArgs);
         }
         self.virtual_address = start_vaddr;

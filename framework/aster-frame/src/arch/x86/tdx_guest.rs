@@ -1,26 +1,20 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use iced_x86::{Code, Decoder, DecoderOptions, Instruction, Register};
-use log::warn;
-use tdx_guest::{
-    serial_println, tdcall,
-    tdcall::{accept_page, TdgVeInfo},
-    tdvmcall,
-    tdvmcall::{cpuid, hlt, map_gpa, rdmsr, read_mmio, write_mmio, wrmsr, IoSize},
-    TdxVirtualExceptionType,
-};
-
 use crate::{
     arch::mm::{is_kernel_vaddr, PageTableFlags},
+    config::PAGE_SIZE,
     vm::{
         paddr_to_vaddr,
         page_table::{PageTableError, KERNEL_PAGE_TABLE},
-        PAGE_SIZE,
     },
 };
-
-const SHARED_BIT: u8 = 51;
-const SHARED_MASK: u64 = 1u64 << SHARED_BIT;
+use iced_x86::{Code, Decoder, DecoderOptions, Instruction, Register};
+use log::warn;
+use tdx_guest::{
+    tdcall::{accept_page, TdgVeInfo},
+    tdvmcall::{cpuid, hlt, map_gpa, rdmsr, read_mmio, write_mmio, wrmsr, IoSize},
+    SHARED_MASK, {serial_println, tdcall, tdvmcall, TdxVirtualExceptionType},
+};
 
 // Intel TDX guest physical address. Maybe protected(private) gpa or unprotected(shared) gpa.
 pub type TdxGpa = usize;

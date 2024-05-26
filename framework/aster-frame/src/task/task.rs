@@ -1,22 +1,20 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use intrusive_collections::{intrusive_adapter, LinkedListAtomicLink};
+use crate::arch::mm::PageTableFlags;
+use crate::config::{KERNEL_STACK_SIZE, PAGE_SIZE};
+use crate::cpu::CpuSet;
+use crate::prelude::*;
+use crate::sync::{Mutex, MutexGuard};
+use crate::user::UserSpace;
+use crate::vm::page_table::KERNEL_PAGE_TABLE;
+use crate::vm::{VmAllocOptions, VmSegment};
 
-use super::{
-    add_task,
-    priority::Priority,
-    processor::{current_task, schedule},
-};
-use crate::{
-    arch::mm::PageTableFlags,
-    cpu::CpuSet,
-    prelude::*,
-    sync::{SpinLock, SpinLockGuard},
-    user::UserSpace,
-    vm::{page_table::KERNEL_PAGE_TABLE, VmAllocOptions, VmSegment, PAGE_SIZE},
-};
+use intrusive_collections::intrusive_adapter;
+use intrusive_collections::LinkedListAtomicLink;
 
-pub const KERNEL_STACK_SIZE: usize = PAGE_SIZE * 64;
+use super::add_task;
+use super::priority::Priority;
+use super::processor::{current_task, schedule};
 
 core::arch::global_asm!(include_str!("switch.S"));
 
@@ -100,15 +98,11 @@ impl Drop for KernelStack {
 }
 
 /// A task that executes a function to the end.
-///
-/// Each task is associated with per-task data and an optional user space.
-/// If having a user space, the task can switch to the user space to
-/// execute user code. Multiple tasks can share a single user space.
 pub struct Task {
     func: Box<dyn Fn() + Send + Sync>,
     data: Box<dyn Any + Send + Sync>,
     user_space: Option<Arc<UserSpace>>,
-    task_inner: SpinLock<TaskInner>,
+    task_inner: Mutex<TaskInner>,
     exit_code: usize,
     /// kernel stack, note that the top is SyscallFrame/TrapFrame
     kstack: KernelStack,
@@ -133,13 +127,13 @@ impl Task {
     }
 
     /// get inner
-    pub(crate) fn inner_exclusive_access(&self) -> SpinLockGuard<'_, TaskInner> {
-        self.task_inner.lock_irq_disabled()
+    pub(crate) fn inner_exclusive_access(&self) -> MutexGuard<'_, TaskInner> {
+        self.task_inner.lock()
     }
 
     /// get inner
     pub(crate) fn inner_ctx(&self) -> TaskContext {
-        self.task_inner.lock_irq_disabled().ctx
+        self.task_inner.lock().ctx
     }
 
     /// Yields execution so that another task may be scheduled.
@@ -157,7 +151,7 @@ impl Task {
 
     /// Returns the task status.
     pub fn status(&self) -> TaskStatus {
-        self.task_inner.lock_irq_disabled().task_status
+        self.task_inner.lock().task_status
     }
 
     /// Returns the task data.
@@ -185,14 +179,12 @@ impl Task {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 /// The status of a task.
 pub enum TaskStatus {
     /// The task is runnable.
     Runnable,
-    /// The task is running in the foreground but will sleep when it goes to the background.
-    Sleepy,
-    /// The task is sleeping in the background.
+    /// The task is sleeping.
     Sleeping,
     /// The task has exited.
     Exited,
@@ -256,11 +248,11 @@ impl TaskOptions {
         self
     }
 
-    /// Build a new task without running it immediately.
+    /// Builds a new task but not run it immediately.
     pub fn build(self) -> Result<Arc<Task>> {
         /// all task will entering this function
         /// this function is mean to executing the task_fn in Task
-        extern "sysv64" fn kernel_task_entry() {
+        fn kernel_task_entry() {
             let current_task = current_task()
                 .expect("no current task, it should have current task in kernel task entry");
             current_task.func.call(());
@@ -270,7 +262,7 @@ impl TaskOptions {
             func: self.func.unwrap(),
             data: self.data.unwrap(),
             user_space: self.user_space,
-            task_inner: SpinLock::new(TaskInner {
+            task_inner: Mutex::new(TaskInner {
                 task_status: TaskStatus::Runnable,
                 ctx: TaskContext::default(),
             }),
@@ -283,46 +275,48 @@ impl TaskOptions {
 
         result.task_inner.lock().task_status = TaskStatus::Runnable;
         result.task_inner.lock().ctx.rip = kernel_task_entry as usize;
-        // We should reserve space for the return address in the stack, otherwise
-        // we will write across the page boundary due to the implementation of
-        // the context switch.
-        // According to the System V AMD64 ABI, the stack pointer should be aligned
-        // to at least 16 bytes. And a larger alignment is needed if larger arguments
-        // are passed to the function. The `kernel_task_entry` function does not
-        // have any arguments, so we only need to align the stack pointer to 16 bytes.
         result.task_inner.lock().ctx.regs.rsp =
-            (crate::vm::paddr_to_vaddr(result.kstack.end_paddr() - 16)) as u64;
+            (crate::vm::paddr_to_vaddr(result.kstack.end_paddr())) as u64;
 
         Ok(Arc::new(result))
     }
 
-    /// Build a new task and run it immediately.
+    /// Builds a new task and run it immediately.
+    ///
+    /// Each task is associated with a per-task data and an optional user space.
+    /// If having a user space, then the task can switch to the user space to
+    /// execute user code. Multiple tasks can share a single user space.
     pub fn spawn(self) -> Result<Arc<Task>> {
-        let task = self.build()?;
-        task.run();
-        Ok(task)
-    }
-}
-
-#[cfg(ktest)]
-mod test {
-    #[ktest]
-    fn create_task() {
-        let task = || {
-            assert_eq!(1, 1);
+        /// all task will entering this function
+        /// this function is mean to executing the task_fn in Task
+        fn kernel_task_entry() {
+            let current_task = current_task()
+                .expect("no current task, it should have current task in kernel task entry");
+            current_task.func.call(());
+            current_task.exit();
+        }
+        let result = Task {
+            func: self.func.unwrap(),
+            data: self.data.unwrap(),
+            user_space: self.user_space,
+            task_inner: Mutex::new(TaskInner {
+                task_status: TaskStatus::Runnable,
+                ctx: TaskContext::default(),
+            }),
+            exit_code: 0,
+            kstack: KernelStack::new_with_guard_page()?,
+            link: LinkedListAtomicLink::new(),
+            priority: self.priority,
+            cpu_affinity: self.cpu_affinity,
         };
-        let task_option = crate::task::TaskOptions::new(task)
-            .data(())
-            .build()
-            .unwrap();
-        task_option.run();
-    }
 
-    #[ktest]
-    fn spawn_task() {
-        let task = || {
-            assert_eq!(1, 1);
-        };
-        let _ = crate::task::TaskOptions::new(task).data(()).spawn();
+        result.task_inner.lock().task_status = TaskStatus::Runnable;
+        result.task_inner.lock().ctx.rip = kernel_task_entry as usize;
+        result.task_inner.lock().ctx.regs.rsp =
+            (crate::vm::paddr_to_vaddr(result.kstack.end_paddr())) as u64;
+
+        let arc_self = Arc::new(result);
+        arc_self.run();
+        Ok(arc_self)
     }
 }

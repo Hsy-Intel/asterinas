@@ -1,25 +1,26 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use core::sync::atomic::{AtomicBool, Ordering};
-
-use log::debug;
-#[cfg(feature = "intel_tdx")]
-use tdx_guest::tdcall;
-use trapframe::TrapFrame;
-
-#[cfg(feature = "intel_tdx")]
-use crate::arch::cpu::VIRTUALIZATION_EXCEPTION;
 #[cfg(feature = "intel_tdx")]
 use crate::arch::tdx_guest::{handle_virtual_exception, TdxTrapFrame};
+use crate::early_println;
 use crate::{
     arch::{
         irq::IRQ_LIST,
-        mm::{PageTableEntry, PageTableFlags},
+        mm::{is_kernel_vaddr, PageTableEntry, PageTableFlags, ALL_MAPPED_PTE},
     },
+    boot::memory_region::MemoryRegion,
+    config::PHYS_OFFSET,
     cpu::{CpuException, PageFaultErrorCode, PAGE_FAULT},
     cpu_local,
-    vm::{PageTable, PHYS_MEM_BASE_VADDR, PHYS_MEM_VADDR_RANGE},
+    user::UserMode,
+    vm::{
+        page_table::{table_of, PageTableEntryTrait, PageTableFlagsTrait, KERNEL_PAGE_TABLE},
+        PageTable,
+    },
 };
+#[cfg(feature = "intel_tdx")]
+use tdx_guest::tdcall;
+use trapframe::TrapFrame;
 
 #[cfg(feature = "intel_tdx")]
 impl TdxTrapFrame for TrapFrame {
@@ -125,34 +126,23 @@ impl TdxTrapFrame for TrapFrame {
 #[no_mangle]
 extern "sysv64" fn trap_handler(f: &mut TrapFrame) {
     if CpuException::is_cpu_exception(f.trap_num as u16) {
-        match CpuException::to_cpu_exception(f.trap_num as u16).unwrap() {
-            #[cfg(feature = "intel_tdx")]
-            &VIRTUALIZATION_EXCEPTION => {
-                let ve_info = tdcall::get_veinfo().expect("#VE handler: fail to get VE info\n");
-                handle_virtual_exception(f, &ve_info);
-            }
-            &PAGE_FAULT => {
-                handle_kernel_page_fault(f);
-            }
-            exception => {
-                panic!(
-                    "Cannot handle kernel cpu exception:{:?}. Error code:{:x?}; Trapframe:{:#x?}.",
-                    exception, f.error_code, f
-                );
-            }
+        #[cfg(feature = "intel_tdx")]
+        if f.trap_num as u16 == 20 {
+            let ve_info = tdcall::get_veinfo().expect("#VE handler: fail to get VE info\n");
+            handle_virtual_exception(f, &ve_info);
+            return;
         }
+        if f.trap_num as u16 == PAGE_FAULT.number {
+            kernel_page_fault_handler(f);
+            return;
+        }
+        panic!("cannot handle kernel cpu fault now, information:{:#x?}", f);
     } else {
         call_irq_callback_functions(f);
     }
 }
 
 pub(crate) fn call_irq_callback_functions(trap_frame: &TrapFrame) {
-    // For x86 CPUs, interrupts are not re-entrant. Local interrupts will be disabled when
-    // an interrupt handler is called (Unless interrupts are re-enabled in an interrupt handler).
-    //
-    // FIXME: For arch that supports re-entrant interrupts, we may need to record nested level here.
-    IN_INTERRUPT_CONTEXT.store(true, Ordering::Release);
-
     let irq_line = IRQ_LIST.get().unwrap().get(trap_frame.trap_num).unwrap();
     let callback_functions = irq_line.callback_list();
     for callback_function in callback_functions.iter() {
@@ -161,67 +151,68 @@ pub(crate) fn call_irq_callback_functions(trap_frame: &TrapFrame) {
     if !CpuException::is_cpu_exception(trap_frame.trap_num as u16) {
         crate::arch::interrupts_ack();
     }
-
-    IN_INTERRUPT_CONTEXT.store(false, Ordering::Release);
 }
 
-cpu_local! {
-    static IN_INTERRUPT_CONTEXT: AtomicBool = AtomicBool::new(false);
-}
-
-/// Returns whether we are in the interrupt context.
-///
-/// FIXME: Here only hardware irq is taken into account. According to linux implementation, if
-/// we are in softirq context, or bottom half is disabled, this function also returns true.
-pub fn in_interrupt_context() -> bool {
-    IN_INTERRUPT_CONTEXT.load(Ordering::Acquire)
-}
-
-fn handle_kernel_page_fault(f: &TrapFrame) {
+fn kernel_page_fault_handler(f: &TrapFrame) {
+    // We only create mapping: `vaddr = paddr + PHYS_OFFSET` in kernel page fault handler.
     let page_fault_vaddr = x86_64::registers::control::Cr2::read().as_u64();
+    debug_assert!(is_kernel_vaddr(page_fault_vaddr as usize));
+
+    // Check kernel region
+    // FIXME: The modification to the offset mapping of the kernel code and data should not permitted.
+    let kernel_region = MemoryRegion::kernel();
+    debug_assert!(
+        page_fault_vaddr < kernel_region.base() as u64
+            || page_fault_vaddr > (kernel_region.base() + kernel_region.len()) as u64
+    );
+
+    // Check error code and construct flags
     let error_code = PageFaultErrorCode::from_bits_truncate(f.error_code);
-    debug!(
-        "kernel page fault: address {:?}, error code {:?}",
-        page_fault_vaddr as *const (), error_code
-    );
+    debug_assert!(!error_code.contains(PageFaultErrorCode::USER));
+    // Instruction fetch is not permitted in kernel page fault handler
+    debug_assert!(!error_code.contains(PageFaultErrorCode::INSTRUCTION));
+    let mut flags = PageTableFlags::empty()
+        .set_present(true)
+        .set_executable(false)
+        | PageTableFlags::SHARED;
+    if error_code.contains(PageFaultErrorCode::WRITE) {
+        flags = flags.set_writable(true);
+    }
 
-    assert!(
-        PHYS_MEM_VADDR_RANGE.contains(&(page_fault_vaddr as usize)),
-        "kernel page fault: the address is outside the range of the direct mapping",
-    );
+    // Handle page fault
+    let mut kernel_page_table = KERNEL_PAGE_TABLE.get().unwrap().lock_irq_disabled();
+    if error_code.contains(PageFaultErrorCode::PRESENT) {
+        // Safety: The page fault address has been checked and the flags is constructed based on error code.
+        unsafe {
+            kernel_page_table
+                .protect(page_fault_vaddr as usize, flags)
+                .unwrap();
+        }
+    } else {
+        // Safety: The page fault address has been checked and the flags is constructed based on error code.
+        let paddr = page_fault_vaddr as usize - PHYS_OFFSET;
+        unsafe {
+            kernel_page_table
+                .map(page_fault_vaddr as usize, paddr, flags)
+                .unwrap();
+        }
+        // Safety: page_directory_base is read from kernel page table, the address is valid.
+        let p4 = unsafe { table_of::<PageTableEntry>(kernel_page_table.root_paddr()).unwrap() };
+        let mut map_pte = ALL_MAPPED_PTE.lock();
+        let pte_entry_index = PageTableEntry::page_index(page_fault_vaddr as usize, 4);
+        if !map_pte.contains_key(&pte_entry_index) {
+            map_pte.insert(pte_entry_index, p4[pte_entry_index]);
+        }
 
-    const SUPPORTED_ERROR_CODES: PageFaultErrorCode = PageFaultErrorCode::PRESENT
-        .union(PageFaultErrorCode::WRITE)
-        .union(PageFaultErrorCode::INSTRUCTION);
-    assert!(
-        SUPPORTED_ERROR_CODES.contains(error_code),
-        "kernel page fault: the error code is not supported",
-    );
-
-    assert!(
-        !error_code.contains(PageFaultErrorCode::INSTRUCTION),
-        "kernel page fault: the direct mapping cannot be executed",
-    );
-    assert!(
-        !error_code.contains(PageFaultErrorCode::PRESENT),
-        "kernel page fault: the direct mapping already exists",
-    );
-
-    // FIXME: Is it safe to call `PageTable::from_root_register` here?
-    let mut page_table: PageTable<PageTableEntry, crate::vm::page_table::KernelMode> =
-        unsafe { PageTable::from_root_register() };
-
-    let paddr = page_fault_vaddr as usize - PHYS_MEM_BASE_VADDR;
-    let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
-
-    // SAFETY:
-    // 1. We have checked that the page fault address falls within the address range of the direct
-    //    mapping of physical memory.
-    // 2. We map the address to the correct physical page with the correct flags, where the
-    //    correctness follows the semantics of the direct mapping of physical memory.
-    unsafe {
-        page_table
-            .map(page_fault_vaddr as usize, paddr, flags)
-            .unwrap();
+        // Although the mapping is constructed in the kernel page table, there are still some cases where the mapping is
+        // not added to the current page table (such as the user mode page table created).
+        //
+        // Safety: The modification will not affect kernel safety and the virtual address doesn't belong to the user
+        // virtual address.
+        unsafe {
+            let mut current_page_table: PageTable<PageTableEntry, crate::vm::page_table::UserMode> =
+                PageTable::from_root_register();
+            current_page_table.add_root_mapping(pte_entry_index, &p4[pte_entry_index]);
+        }
     }
 }

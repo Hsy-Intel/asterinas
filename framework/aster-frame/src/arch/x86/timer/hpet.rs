@@ -1,19 +1,15 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use alloc::vec::Vec;
-
+use crate::{trap::IrqLine, vm::paddr_to_vaddr};
 use acpi::{AcpiError, HpetInfo};
+use alloc::vec::Vec;
 use spin::Once;
 use volatile::{
     access::{ReadOnly, ReadWrite},
     Volatile,
 };
 
-use crate::{
-    arch::x86::kernel::{acpi::ACPI_TABLES, apic::ioapic},
-    trap::IrqLine,
-    vm::paddr_to_vaddr,
-};
+use crate::arch::x86::kernel::{acpi::ACPI_TABLES, apic::ioapic};
 static HPET_INSTANCE: Once<Hpet> = Once::new();
 
 const OFFSET_ID_REGISTER: usize = 0x000;
@@ -63,10 +59,6 @@ impl Hpet {
 
         let mut comparators = Vec::with_capacity(num_comparator as usize);
 
-        // Ensure that the addresses in the loop will not overflow
-        base_address
-            .checked_add(0x100 + num_comparator as usize * 0x20)
-            .unwrap();
         for i in 0..num_comparator {
             let comp = Volatile::new(unsafe {
                 &mut *(paddr_to_vaddr(base_address + 0x100 + i as usize * 0x20) as *mut usize

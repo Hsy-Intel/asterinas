@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
 use core::fmt::Debug;
 
+use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
 use log::{debug, error};
 
-use super::{device_info::PciDeviceId, PciCommonDevice};
 use crate::bus::BusProbeError;
+
+use super::{device_info::PciDeviceId, PciCommonDevice};
 
 pub trait PciDevice: Sync + Send + Debug {
     fn device_id(&self) -> PciDeviceId;
