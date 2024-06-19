@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - tdx_ci
 
 jobs:
   lint:
@@ -86,3 +87,29 @@ jobs:
       - name: Regression Test (Linux EFI Handover Boot Protocol)
         id: regression_test_linux
         run: make run AUTO_TEST=regression ENABLE_KVM=0 BOOT_PROTOCOL=linux-efi-handover64 RELEASE=1
+
+  integration-test-tdx:
+    runs-on: self-hosted
+    timeout-minutes: 30
+    container: asterinas/asterinas:0.4.2_tdx
+    steps:
+      - run: echo "Running in asterinas/asterinas:0.4.2_tdx"
+
+      - uses: actions/checkout@v4
+
+      - name: Boot Test (Linux EFI Handover Boot Protocol)
+        id: boot_test_linux_efi_handover64
+        run: make run AUTO_TEST=boot RELEASE=1 INTEL_TDX=1
+
+      - name: Syscall Test (Linux EFI Handover Boot Protocol)
+        id: syscall_test
+        run: make run AUTO_TEST=syscall RELEASE=1 INTEL_TDX=1
+
+      - name: Syscall Test at Exfat
+        id: syscall_test_at_exfat_linux
+        run: make run AUTO_TEST=syscall SYSCALL_TEST_DIR=/exfat EXTRA_BLOCKLISTS_DIRS=blocklists.exfat RELEASE=1 INTEL_TDX=1
+
+      - name: Regression Test (Linux EFI Handover Boot Protocol)
+        id: regression_test_linux
+        run: make run AUTO_TEST=regression RELEASE=1 INTEL_TDX=1
+
