@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - tdx_ci
 
 jobs:
   lint:
@@ -91,9 +90,9 @@ jobs:
   integration-test-tdx:
     runs-on: self-hosted
     timeout-minutes: 30
-    container: asterinas/asterinas:0.4.2_tdx
+    container: asterinas/asterinas:0.5.0-tdx
     steps:
-      - run: echo "Running in asterinas/asterinas:0.4.2_tdx"
+      - run: echo "Running in asterinas/asterinas:0.5.0-tdx"
 
       - uses: actions/checkout@v4
 

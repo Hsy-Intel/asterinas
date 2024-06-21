@@ -70,7 +70,9 @@ CARGO_OSDK_ARGS += --grub-boot-protocol=$(BOOT_PROTOCOL)
 endif
 
 ifeq ($(ENABLE_KVM), 1)
+ifneq ($(INTEL_TDX), 1)
 CARGO_OSDK_ARGS += --qemu-args="--enable-kvm"
+endif
 endif
 
 # Pass make variables to all subdirectory makes
