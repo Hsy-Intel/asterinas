@@ -91,18 +91,25 @@ jobs:
   integration-test-tdx:
     runs-on: self-hosted
     timeout-minutes: 30
-    services:
-      kvm:
-        image: asterinas/asterinas:0.5.1-tdx
-        options: --device /dev/kvm
-      container:
-        image: asterinas/asterinas:0.5.1-tdx
-        options: --device /dev/kvm
+    container:
+      image: asterinas/asterinas:0.5.1-tdx
+      options: --device /dev/kvm
+    env:
+      # Need to set up proxy since the self-hosted CI server is located in China,
+      # which has poor network connection to the official Rust crate repositories.
+      RUSTUP_DIST_SERVER: https://mirrors.ustc.edu.cn/rust-static
+      RUSTUP_UPDATE_ROOT: https://mirrors.ustc.edu.cn/rust-static/rustup
     steps:
       - run: echo "Running in asterinas/asterinas:0.5.1-tdx"
 
       - uses: actions/checkout@v4
-
+      - name: Set up the environment
+        run: |
+          chmod +x regression/benchmark/bench_linux_and_aster.sh
+          # Set up git due to the network issue on the self-hosted runner
+          git config --global --add safe.directory /__w/asterinas/asterinas
+          git config --global http.sslVerify false
+          git config --global http.version HTTP/1.1
       - name: Boot Test (Linux EFI Handover Boot Protocol)
         id: boot_test_linux_efi_handover64
         run: make run AUTO_TEST=boot RELEASE=1 INTEL_TDX=1
