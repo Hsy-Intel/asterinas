@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use aster_frame::mm::{DmaCoherent, FrameAllocOptions, HasPaddr, VmIo};
+use ostd::mm::{DmaCoherent, FrameAllocOptions, HasPaddr, VmIo};
 use tdx_guest::tdcall::{get_report, TdCallError};
 
 use super::*;
@@ -53,6 +53,7 @@ impl From<TdCallError> for Error {
                 Error::with_message(Errno::EBUSY, "TdCallError::TdxOperandBusy")
             }
             TdCallError::Other => Error::with_message(Errno::EAGAIN, "TdCallError::Other"),
+            _ => todo!(),
         }
     }
 }

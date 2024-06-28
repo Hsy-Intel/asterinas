@@ -46,7 +46,6 @@ qemu.args = "$(./tools/qemu_args.sh iommu)"
 supported_archs = ["x86_64"]
 build.features = ["intel_tdx"]
 boot.method = "grub-qcow2"
-grub.mkrescue_path = "~/tdx-tools/grub"
 grub.protocol = "linux"
 qemu.args = """\
     -accel kvm \
