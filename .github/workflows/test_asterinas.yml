@@ -101,7 +101,6 @@ jobs:
       RUSTUP_UPDATE_ROOT: https://mirrors.ustc.edu.cn/rust-static/rustup
     steps:
       - run: echo "Running in asterinas/asterinas:0.5.1-tdx"
-
       - uses: actions/checkout@v4
       - name: Set up the environment
         run: |
@@ -110,6 +109,7 @@ jobs:
           git config --global --add safe.directory /__w/asterinas/asterinas
           git config --global http.sslVerify false
           git config --global http.version HTTP/1.1
+          make install_osdk
       - name: Boot Test (Linux EFI Handover Boot Protocol)
         id: boot_test_linux_efi_handover64
         run: make run AUTO_TEST=boot RELEASE=1 INTEL_TDX=1
