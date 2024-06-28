@@ -91,7 +91,13 @@ jobs:
   integration-test-tdx:
     runs-on: self-hosted
     timeout-minutes: 30
-    container: asterinas/asterinas:0.5.1-tdx
+    services:
+      kvm:
+        image: asterinas/asterinas:0.5.1-tdx
+        options: --privileged --device /dev/kvm
+      container:
+        image: asterinas/asterinas:0.5.1-tdx
+        options: --privileged --device /dev/kvm
     steps:
       - run: echo "Running in asterinas/asterinas:0.5.1-tdx"
 
