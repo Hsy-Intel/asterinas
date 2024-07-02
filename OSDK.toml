@@ -65,7 +65,7 @@ qemu.args = """\
     -device virtio-net-pci,netdev=mynet0 \
     -device virtio-keyboard-pci,disable-legacy=on,disable-modern=off \
     -netdev user,id=mynet0,hostfwd=tcp::10027-:22 \
-    -chardev stdio,id=mux,mux=on,logfile=./$(date '+%Y-%m-%dT%H%M%S').log \
+    -chardev stdio,id=mux,mux=on,logfile=qemu.log \
     -device virtio-serial,romfile= \
     -device virtconsole,chardev=mux \
     -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
