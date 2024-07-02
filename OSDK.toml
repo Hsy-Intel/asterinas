@@ -68,6 +68,7 @@ qemu.args = """\
     -chardev stdio,id=mux,mux=on,logfile=./$(date '+%Y-%m-%dT%H%M%S').log \
     -device virtio-serial,romfile= \
     -device virtconsole,chardev=mux \
+    -device isa-debug-exit,iobase=0xf4,iosize=0x04 \
     -monitor chardev:mux \
     -serial chardev:mux \
 """
