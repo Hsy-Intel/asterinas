@@ -101,7 +101,10 @@ jobs:
       RUSTUP_UPDATE_ROOT: https://mirrors.ustc.edu.cn/rust-static/rustup
     steps:
       - run: echo "Running in asterinas/asterinas:0.6.0-tdx"
-      - uses: actions/checkout@v4
+      - uses: nick-invision/retry@v2
+        with:
+          timeout_minutes: 20
+          max_attempts: 3
       - name: Set up the environment
         run: |
           chmod +x test/benchmark/bench_linux_and_aster.sh
