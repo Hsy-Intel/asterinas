@@ -109,8 +109,6 @@ jobs:
           git config --global --add safe.directory /__w/asterinas/asterinas
           git config --global http.sslVerify false
           git config --global http.version HTTP/1.1
-          make install_osdk
-          which qemu-system-x86_64
       - name: Boot Test (Linux EFI Handover Boot Protocol)
         uses: nick-invision/retry@v2
         id: boot_test_linux_efi_handover64
