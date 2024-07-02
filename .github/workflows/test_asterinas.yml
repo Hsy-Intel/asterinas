@@ -101,10 +101,7 @@ jobs:
       RUSTUP_UPDATE_ROOT: https://mirrors.ustc.edu.cn/rust-static/rustup
     steps:
       - run: echo "Running in asterinas/asterinas:0.6.0-tdx"
-      - uses: nick-invision/retry@v2
-        with:
-          timeout_minutes: 20
-          max_attempts: 3
+      - uses: actions/checkout@v4
       - name: Set up the environment
         run: |
           chmod +x test/benchmark/bench_linux_and_aster.sh
@@ -115,17 +112,37 @@ jobs:
           make install_osdk
           which qemu-system-x86_64
       - name: Boot Test (Linux EFI Handover Boot Protocol)
+        uses: nick-invision/retry@v2
         id: boot_test_linux_efi_handover64
-        run: make run AUTO_TEST=boot INTEL_TDX=1
+        with:
+          timeout_minutes: 20
+          max_attempts: 3
+          command: make run AUTO_TEST=boot INTEL_TDX=1
+        on_retry_command: make clean
 
       - name: Syscall Test (Linux EFI Handover Boot Protocol)
+        uses: nick-invision/retry@v2
         id: syscall_test
-        run: make run AUTO_TEST=syscall INTEL_TDX=1
+        with:
+          timeout_minutes: 20
+          max_attempts: 3
+          command: make run AUTO_TEST=syscall INTEL_TDX=1
+        on_retry_command: make clean
 
       - name: Syscall Test at Exfat
+        uses: nick-invision/retry@v2
         id: syscall_test_at_exfat_linux
-        run: make run AUTO_TEST=syscall SYSCALL_TEST_DIR=/exfat EXTRA_BLOCKLISTS_DIRS=blocklists.exfat INTEL_TDX=1
+        with:
+          timeout_minutes: 20
+          max_attempts: 3
+          command: make run AUTO_TEST=syscall SYSCALL_TEST_DIR=/exfat EXTRA_BLOCKLISTS_DIRS=blocklists.exfat INTEL_TDX=1
+        on_retry_command: make clean
 
       - name: Regression Test (Linux EFI Handover Boot Protocol)
+        uses: nick-invision/retry@v2
         id: regression_test_linux
-        run: make run AUTO_TEST=regression INTEL_TDX=1
+        with:
+          timeout_minutes: 20
+          max_attempts: 3
+          command: make run AUTO_TEST=regression INTEL_TDX=1
+        on_retry_command: make clean
