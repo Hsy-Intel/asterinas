@@ -104,7 +104,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Set up the environment
         run: |
-          chmod +x regression/benchmark/bench_linux_and_aster.sh
+          chmod +x test/benchmark/bench_linux_and_aster.sh
           # Set up git due to the network issue on the self-hosted runner
           git config --global --add safe.directory /__w/asterinas/asterinas
           git config --global http.sslVerify false
