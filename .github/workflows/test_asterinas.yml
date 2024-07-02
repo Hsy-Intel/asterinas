@@ -139,4 +139,4 @@ jobs:
         with:
           timeout_minutes: 20
           max_attempts: 3
-          command: make run AUTO_TEST=regression INTEL_TDX=1
+          command: make run AUTO_TEST=test INTEL_TDX=1
