@@ -110,6 +110,7 @@ jobs:
           git config --global http.sslVerify false
           git config --global http.version HTTP/1.1
           make install_osdk
+          which qemu-system-x86_64
       - name: Boot Test (Linux EFI Handover Boot Protocol)
         id: boot_test_linux_efi_handover64
         run: make run AUTO_TEST=boot RELEASE=1 INTEL_TDX=1
