@@ -111,6 +111,6 @@ fn handle_get_report(arg: usize) -> Result<i32> {
     dma_coherent
         .read_bytes(1024, &mut generated_report)
         .unwrap();
-    write_bytes_to_user(tdx_report_vaddr, &mut generated_report)?;
+    write_bytes_to_user(tdx_report_vaddr, &mut VmReader::from(generated_report))?;
     Ok(0)
 }
