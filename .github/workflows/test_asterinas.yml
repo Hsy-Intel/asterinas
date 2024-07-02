@@ -118,7 +118,6 @@ jobs:
           timeout_minutes: 20
           max_attempts: 3
           command: make run AUTO_TEST=boot INTEL_TDX=1
-        on_retry_command: make clean
 
       - name: Syscall Test (Linux EFI Handover Boot Protocol)
         uses: nick-invision/retry@v2
@@ -127,7 +126,6 @@ jobs:
           timeout_minutes: 20
           max_attempts: 3
           command: make run AUTO_TEST=syscall INTEL_TDX=1
-        on_retry_command: make clean
 
       - name: Syscall Test at Exfat
         uses: nick-invision/retry@v2
@@ -136,7 +134,6 @@ jobs:
           timeout_minutes: 20
           max_attempts: 3
           command: make run AUTO_TEST=syscall SYSCALL_TEST_DIR=/exfat EXTRA_BLOCKLISTS_DIRS=blocklists.exfat INTEL_TDX=1
-        on_retry_command: make clean
 
       - name: Regression Test (Linux EFI Handover Boot Protocol)
         uses: nick-invision/retry@v2
@@ -145,4 +142,3 @@ jobs:
           timeout_minutes: 20
           max_attempts: 3
           command: make run AUTO_TEST=regression INTEL_TDX=1
-        on_retry_command: make clean
