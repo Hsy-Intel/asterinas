@@ -4,6 +4,7 @@
 # Entrypoint for the benchmark VM
 
 set -e
+set -x
 
 BENCHMARK_ROOT="/benchmark"
 READY_MESSAGE="The VM is ready for the benchmark."
