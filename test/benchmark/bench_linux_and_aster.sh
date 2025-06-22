@@ -4,6 +4,7 @@
 
 set -e
 set -o pipefail
+set -x
 
 # Ensure all dependencies are installed
 if ! command -v yq >/dev/null 2>&1; then
@@ -84,9 +85,10 @@ run_benchmark() {
     local benchmark="$1"
     local run_mode="$2"
     local runtime_configs_str="$3" # String with key=value pairs, one per line
+    local platform="$4"
 
     echo "Preparing libraries..."
-    prepare_libs
+    prepare_libs "$platform"
 
     # Default values
     local smp_val=1
@@ -255,7 +257,7 @@ main() {
     fi
 
     # Run the benchmark, passing the config string
-    run_benchmark "$benchmark" "$run_mode" "$runtime_configs_str"
+    run_benchmark "$benchmark" "$run_mode" "$runtime_configs_str" "$platform"
 
     # Parse results if benchmark configuration exists
     if [[ -f "$bench_result" ]]; then
