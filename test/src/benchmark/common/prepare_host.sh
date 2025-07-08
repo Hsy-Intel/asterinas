@@ -4,6 +4,7 @@
 
 set -e
 set -o pipefail
+set -x
 
 # Set BENCHMARK_ROOT to the parent directory of the current directory if it is not set
 BENCHMARK_ROOT="${BENCHMARK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." &>/dev/null && pwd)}"

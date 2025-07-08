@@ -4,6 +4,7 @@
 
 set -e
 set -o pipefail
+set -x
 
 # Ensure all dependencies are installed
 if ! command -v yq >/dev/null 2>&1; then
