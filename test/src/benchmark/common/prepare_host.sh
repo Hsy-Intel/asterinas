@@ -13,7 +13,7 @@ ASTER_OUTPUT="${BENCHMARK_ROOT}/aster_output.txt"
 # Dependencies for Linux
 LINUX_DEPENDENCIES_DIR="/opt/linux_binary_cache"
 LINUX_KERNEL="${LINUX_DEPENDENCIES_DIR}/vmlinuz"
-LINUX_KERNEL_VERSION="6.16.0"
+LINUX_KERNEL_VERSION="6.16.0-rc7"
 LINUX_MODULES_DIR="${BENCHMARK_ROOT}/../build/initramfs/lib/modules/${LINUX_KERNEL_VERSION}/kernel"
 WGET_SCRIPT="${BENCHMARK_ROOT}/../../../tools/atomic_wget.sh"
 
@@ -23,7 +23,7 @@ prepare_libs() {
 
     # Array of files to download and their URLs
     declare -A files=(
-        ["${LINUX_KERNEL}"]="https://raw.githubusercontent.com/asterinas/linux_binary_cache/24db4ff/vmlinuz-${LINUX_KERNEL_VERSION}"
+        ["${LINUX_KERNEL}"]="https://raw.githubusercontent.com/Hsy-Intel/linux_binary_cache/main/vmlinuz-${LINUX_KERNEL_VERSION}"
     )
 
     # Download files if they don't exist
