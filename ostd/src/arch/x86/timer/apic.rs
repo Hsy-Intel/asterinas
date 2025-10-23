@@ -46,6 +46,12 @@ pub(super) fn timer_callback() {
         Config::DeadlineMode { tsc_interval } => {
             let tsc_value = crate::arch::read_tsc();
             let next_tsc_value = tsc_interval + tsc_value;
+            // TODO: Prevent Iago attack: Validate TSC deadline write in TDX environment.
+            // This WRMSR triggers #VE exception, requiring untrusted VMM cooperation for
+            // TSC deadline timer functionality. Critical security concerns:
+            // - VMM may silently ignore deadline writes, breaking periodic timer behavior
+            // - VMM may set incorrect deadline values, causing timing attacks or DoS
+            // Consider implementing: Open questions for discussion.
             unsafe { wrmsr(IA32_TSC_DEADLINE, next_tsc_value) };
         }
         Config::PeriodicMode { .. } => {}

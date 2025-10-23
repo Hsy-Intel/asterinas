@@ -53,6 +53,15 @@ use crate::{
 /// This function needs to be called after the OS initializes the ACPI table.
 pub(crate) fn count_processors() -> Option<u32> {
     let acpi_tables = get_acpi_tables()?;
+    // TODO: Prevent Iago attack: Validate MADT table integrity and sanity check processor counts in Intel TDX environment.
+    // The untrusted input could provide a malicious ACPI table with:
+    // - Excessive processor counts to cause resource exhaustion
+    // - Invalid APIC IDs or flags to disrupt processor enumeration
+    // - Corrupted table structure to trigger parsing vulnerabilities
+    // - Inconsistent processor counts across multiple calls (time-of-check-time-of-use attack)
+    // Consider implementing: checksum verification, reasonable bounds checking on processor counts,
+    // validation of APIC ID ranges and flag values against expected hardware limits,
+    // and caching/consistency checks to detect TOCTOU attacks.
     let madt_table = acpi_tables.find_table::<acpi::madt::Madt>().ok()?;
 
     // According to ACPI spec [1], "If this bit [the Enabled bit] is set the processor is ready for

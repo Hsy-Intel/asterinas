@@ -169,6 +169,17 @@ pub(in crate::arch) fn init(io_mem_builder: &IoMemAllocatorBuilder) {
     // correctly and reliably (e.g., by parsing the MultiProcessor Specification, which has
     // been deprecated for a long time and may not even exist in modern hardware).
     let acpi_tables = get_acpi_tables().unwrap();
+    // TODO: Prevent Iago attack: Validate MADT table integrity and I/O APIC configuration data in Intel TDX environment.
+    // The untrusted input could provide a malicious ACPI table with:
+    // - Invalid I/O APIC base addresses that could cause memory access violations or overlap with critical memory regions
+    // - Excessive number of I/O APICs to cause resource exhaustion during initialization
+    // - Invalid GSI (Global System Interrupt) ranges that could disrupt interrupt routing
+    // - Malicious interrupt source overrides that redirect critical interrupts (e.g., timer, keyboard)
+    // - Corrupted MADT structure or inconsistent entry counts
+    // - Out-of-range IRQ numbers or invalid bus types in ISA overrides
+    // Consider implementing: checksum verification, validate I/O APIC addresses against known memory maps,
+    // bounds checking on interrupt numbers and GSI ranges, reasonable limits on APIC counts,
+    // and validation of critical interrupt mappings (timer, system interrupts).
     let madt_table = acpi_tables.find_table::<Madt>().unwrap();
 
     // "A one indicates that the system also has a PC-AT-compatible dual-8259 setup. The 8259
