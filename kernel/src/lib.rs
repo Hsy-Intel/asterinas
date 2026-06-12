@@ -21,6 +21,7 @@
 #![register_tool(component_access_control)]
 
 extern crate alloc;
+use aster_dm as _;
 extern crate lru;
 #[macro_use]
 extern crate controlled;

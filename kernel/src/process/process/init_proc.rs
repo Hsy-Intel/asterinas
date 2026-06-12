@@ -30,8 +30,9 @@ pub fn spawn_init_process(
     envp: Vec<CString>,
 ) -> Result<Arc<Process>> {
     let process = if let Some(executable_path) = executable_path {
+        let resolved_executable_path = crate::fs::boot_root::resolve_init_path(executable_path);
         create_init_process(
-            executable_path,
+            &resolved_executable_path,
             with_init_argv0(executable_path, argv),
             envp,
         )?
@@ -56,14 +57,15 @@ pub fn spawn_init_process(
 fn create_default_init_process(argv: Vec<CString>, envp: Vec<CString>) -> Result<Arc<Process>> {
     // Linux probes the fallback init executables in this order:
     // <https://elixir.bootlin.com/linux/v6.19/source/init/main.c#L1634>.
-    const DEFAULT_INIT_EXEC_PATHS: &[&str] = &["/sbin/init", "/etc/init", "/bin/init", "/bin/sh"];
 
     let mut last_error = None;
 
-    for default_init_exec_path in DEFAULT_INIT_EXEC_PATHS {
+    for default_init_exec_path in ["/sbin/init", "/etc/init", "/bin/init", "/bin/sh"] {
+        let resolved_init_exec_path =
+            crate::fs::boot_root::resolve_init_path(default_init_exec_path);
         // FIXME: Avoid cloning `argv` and `envp` for each fallback candidate.
         match create_init_process(
-            default_init_exec_path,
+            &resolved_init_exec_path,
             with_init_argv0(default_init_exec_path, argv.clone()),
             envp.clone(),
         ) {

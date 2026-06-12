@@ -42,6 +42,25 @@ GDB_PROFILE_INTERVAL ?= 0.1
 # mode using the kernel command line.
 # Here are the options for the auto test feature.
 AUTO_TEST ?= none
+# Optional extra kernel command-line arguments appended to cargo-osdk invocations.
+EXTRA_KCMD_ARGS ?=
+# Optional raw QEMU arguments appended to cargo-osdk invocations.
+EXTRA_QEMU_ARGS ?=
+# Optional dm_mod.create fragment appended by the opt-in dm-verity helper target.
+DM_VERITY_CREATE_ARGS ?=
+DM_VERITY_SAMPLE_DIR ?= $(abspath target/verity-vector)
+DM_VERITY_SAMPLE_DATA_IMG ?= $(DM_VERITY_SAMPLE_DIR)/data.img
+DM_VERITY_SAMPLE_HASH_IMG ?= $(DM_VERITY_SAMPLE_DIR)/hash.img
+DM_VERITY_SAMPLE_ROOT_HASH_FILE ?= $(DM_VERITY_SAMPLE_DIR)/root_hash.txt
+DM_VERITY_SAMPLE_DATA_DEV ?= /dev/vdc
+DM_VERITY_SAMPLE_HASH_DEV ?= /dev/vdd
+DM_VERITY_ROOT_SAMPLE_DIR ?= $(abspath target/verity-root-sample)
+DM_VERITY_ROOT_SAMPLE_DATA_IMG ?= $(DM_VERITY_ROOT_SAMPLE_DIR)/rootfs.img
+DM_VERITY_ROOT_SAMPLE_HASH_IMG ?= $(DM_VERITY_ROOT_SAMPLE_DIR)/hash.img
+DM_VERITY_ROOT_SAMPLE_ROOT_HASH_FILE ?= $(DM_VERITY_ROOT_SAMPLE_DIR)/root_hash.txt
+DM_VERITY_ROOT_SAMPLE_GEOMETRY_FILE ?= $(DM_VERITY_ROOT_SAMPLE_DIR)/geometry.env
+DM_VERITY_ROOT_SAMPLE_DATA_DEV ?= /dev/vdc
+DM_VERITY_ROOT_SAMPLE_HASH_DEV ?= /dev/vdd
 # Specify whether to build conformance tests under `test/initramfs/src/conformance`.
 ENABLE_CONFORMANCE_TEST ?= false
 CONFORMANCE_TEST_SUITE ?= ltp
@@ -104,6 +123,9 @@ CARGO_OSDK_COMMON_ARGS :=
 # The build arguments also apply to the `cargo osdk run` command.
 CARGO_OSDK_BUILD_ARGS := --kcmd-args="ostd.log_level=$(LOG_LEVEL)"
 CARGO_OSDK_BUILD_ARGS += --kcmd-args="console=$(CONSOLE)"
+ifneq ($(strip $(EXTRA_KCMD_ARGS)),)
+CARGO_OSDK_BUILD_ARGS += --kcmd-args='$(EXTRA_KCMD_ARGS)'
+endif
 CARGO_OSDK_TEST_ARGS :=
 
 ifeq ($(AUTO_TEST), conformance)
@@ -123,6 +145,8 @@ CARGO_OSDK_BUILD_ARGS += --kcmd-args="INTEL_TDX=$(INTEL_TDX)"
 CARGO_OSDK_BUILD_ARGS += --init-args="/test/run_regression_test.sh"
 else ifeq ($(AUTO_TEST), boot)
 CARGO_OSDK_BUILD_ARGS += --init-args="/test/boot_hello.sh"
+else ifeq ($(AUTO_TEST), dm_verity_boot)
+CARGO_OSDK_BUILD_ARGS += --init-args="/test/boot_dm_verity.sh"
 else ifeq ($(AUTO_TEST), vsock)
 ENABLE_REGRESSION_TEST := true
 export VSOCK=on
@@ -205,6 +229,10 @@ ifeq ($(ENABLE_KVM), 1)
 	endif
 endif
 
+ifneq ($(strip $(EXTRA_QEMU_ARGS)),)
+CARGO_OSDK_COMMON_ARGS += --qemu-args="$(EXTRA_QEMU_ARGS)"
+endif
+
 # Skip GZIP to make encoding and decoding of initramfs faster
 ifeq ($(INITRAMFS_SKIP_GZIP),1)
 CARGO_OSDK_INITRAMFS_OPTION := --initramfs=$(abspath test/initramfs/build/initramfs.cpio)
@@ -271,6 +299,39 @@ kernel: initramfs $(CARGO_OSDK)
 .PHONY: run_kernel
 run_kernel: initramfs $(CARGO_OSDK)
 	@cd kernel && cargo osdk run $(CARGO_OSDK_BUILD_ARGS)
+
+# Build and run the kernel with an opt-in dm_mod.create fragment appended to the
+# kernel command line. This keeps default boot flows unchanged.
+.PHONY: run_kernel_with_verity
+run_kernel_with_verity:
+	@if [ -z '$(strip $(DM_VERITY_CREATE_ARGS))' ]; then \
+		echo "Error: DM_VERITY_CREATE_ARGS must be set to a dm_mod.create fragment."; \
+		exit 1; \
+	fi
+	@$(MAKE) --no-print-directory run_kernel EXTRA_KCMD_ARGS='$(strip $(EXTRA_KCMD_ARGS) $(DM_VERITY_CREATE_ARGS))' EXTRA_QEMU_ARGS='$(EXTRA_QEMU_ARGS)' AUTO_TEST='$(AUTO_TEST)'
+
+.PHONY: run_kernel_with_verity_sample
+run_kernel_with_verity_sample: refresh_verity_test_vector
+	@root_hash=$$(tr -d '\n' < '$(DM_VERITY_SAMPLE_ROOT_HASH_FILE)'); \
+	$(MAKE) --no-print-directory run_kernel_with_verity \
+		AUTO_TEST='$(AUTO_TEST)' \
+		EXTRA_QEMU_ARGS="-drive if=none,format=raw,id=verity_data,file=$(DM_VERITY_SAMPLE_DATA_IMG) -device virtio-blk-pci,bus=pcie.0,addr=0xa,drive=verity_data,serial=verity-data,disable-legacy=on,disable-modern=off,queue-size=64,num-queues=1,request-merging=off,backend_defaults=off,discard=off,write-zeroes=off,event_idx=off,indirect_desc=off,queue_reset=off -drive if=none,format=raw,id=verity_hash,file=$(DM_VERITY_SAMPLE_HASH_IMG) -device virtio-blk-pci,bus=pcie.0,addr=0xb,drive=verity_hash,serial=verity-hash,disable-legacy=on,disable-modern=off,queue-size=64,num-queues=1,request-merging=off,backend_defaults=off,discard=off,write-zeroes=off,event_idx=off,indirect_desc=off,queue_reset=off" \
+		DM_VERITY_CREATE_ARGS="dm_mod.create=\"vm_verity,,,ro,0 24 verity 1 $(DM_VERITY_SAMPLE_DATA_DEV) $(DM_VERITY_SAMPLE_HASH_DEV) 4096 4096 3 0 sha256 $$root_hash 73616c74\""
+
+.PHONY: refresh_verity_root_boot_sample
+refresh_verity_root_boot_sample: initramfs
+	@chmod +x ./tools/generate_verity_root_boot_sample.sh
+	@./tools/generate_verity_root_boot_sample.sh ./test/initramfs/build/initramfs '$(DM_VERITY_ROOT_SAMPLE_DIR)'
+
+.PHONY: run_kernel_with_verity_root_sample
+run_kernel_with_verity_root_sample: refresh_verity_root_boot_sample
+	@. '$(DM_VERITY_ROOT_SAMPLE_GEOMETRY_FILE)'; \
+	$(MAKE) --no-print-directory run_kernel_with_verity \
+		AUTO_TEST='$(AUTO_TEST)' \
+		BOOT_PROTOCOL=multiboot \
+		EXTRA_KCMD_ARGS='$(strip $(EXTRA_KCMD_ARGS) root=/dev/dm-0 rootfstype=ext2 ro init=/init)' \
+		EXTRA_QEMU_ARGS="-drive if=none,format=raw,id=verity_root_data,file=$(DM_VERITY_ROOT_SAMPLE_DATA_IMG) -device virtio-blk-pci,bus=pcie.0,addr=0xa,drive=verity_root_data,serial=verity-root-data,disable-legacy=on,disable-modern=off,queue-size=64,num-queues=1,request-merging=off,backend_defaults=off,discard=off,write-zeroes=off,event_idx=off,indirect_desc=off,queue_reset=off -drive if=none,format=raw,id=verity_root_hash,file=$(DM_VERITY_ROOT_SAMPLE_HASH_IMG) -device virtio-blk-pci,bus=pcie.0,addr=0xb,drive=verity_root_hash,serial=verity-root-hash,disable-legacy=on,disable-modern=off,queue-size=64,num-queues=1,request-merging=off,backend_defaults=off,discard=off,write-zeroes=off,event_idx=off,indirect_desc=off,queue_reset=off" \
+		DM_VERITY_CREATE_ARGS="dm_mod.create=\"vm_verity,,,ro,0 $$NUM_SECTORS verity 1 $(DM_VERITY_ROOT_SAMPLE_DATA_DEV) $(DM_VERITY_ROOT_SAMPLE_HASH_DEV) 4096 4096 $$NUM_DATA_BLOCKS 0 sha256 $$ROOT_HASH $$SALT_HEX\""
 # Check the running status of auto tests from the QEMU log
 ifeq ($(AUTO_TEST), conformance)
 	@tail --lines 100 qemu.log | grep -q "^All conformance tests passed." \
@@ -410,6 +471,26 @@ format:
 	@nixfmt ./distro
 	@$(MAKE) --no-print-directory -C test/initramfs format
 	@$(MAKE) --no-print-directory -C test/nixos format
+
+.PHONY: refresh_verity_test_vector
+refresh_verity_test_vector:
+	@./tools/generate_verity_test_vector.sh
+
+.PHONY: check_verity_test_vector
+check_verity_test_vector:
+	@./tools/generate_verity_test_vector.sh --check
+
+.PHONY: check_verity_test_vector_boot
+check_verity_test_vector_boot:
+	@$(MAKE) --no-print-directory run_kernel_with_verity_sample AUTO_TEST=boot
+
+.PHONY: check_verity_root_boot
+check_verity_root_boot:
+	@$(MAKE) --no-print-directory run_kernel_with_verity_root_sample AUTO_TEST=dm_verity_boot
+
+.PHONY: test_dm_verity_boot
+test_dm_verity_boot:
+	@$(MAKE) --no-print-directory run_kernel_with_verity_sample AUTO_TEST=dm_verity_boot BOOT_PROTOCOL=multiboot
 
 .PHONY: check
 check: private WORKSPACE_MEMBER_DIRS = \

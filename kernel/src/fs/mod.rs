@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
+pub mod boot_root;
 pub mod file;
 mod fs_impls;
 pub mod pipe;
@@ -31,6 +32,7 @@ pub fn init_on_each_cpu() {
 
 pub fn init_in_first_kthread(path_resolver: &PathResolver) {
     rootfs::init_in_first_kthread(path_resolver).unwrap();
+    boot_root::prepare_in_first_kthread(path_resolver);
 }
 
 pub fn init_in_first_process(ctx: &Context) {
@@ -70,4 +72,11 @@ pub fn init_in_first_process(ctx: &Context) {
     file_table.insert(Arc::new(stdin), FdFlags::empty());
     file_table.insert(Arc::new(stdout), FdFlags::empty());
     file_table.insert(Arc::new(stderr), FdFlags::empty());
+
+    drop(file_table);
+    drop(file_table_ref);
+    drop(path_resolver);
+    drop(fs);
+
+    boot_root::activate_in_first_process(ctx).unwrap();
 }

@@ -318,6 +318,22 @@ impl Path {
         Ok(child_mount)
     }
 
+    pub(in crate::fs) fn mount_for_bootstrap(
+        &self,
+        fs: Arc<dyn FileSystem>,
+        flags: PerMountFlags,
+        source: Option<String>,
+    ) -> Result<Arc<Mount>> {
+        if self.type_() != InodeType::Dir {
+            return_errno_with_message!(Errno::ENOTDIR, "the path is not a directory");
+        }
+        if self.is_mount_root() && self.mount.parent().is_none() {
+            return_errno_with_message!(Errno::EINVAL, "the root cannot be mounted on");
+        }
+
+        self.mount.do_mount(fs, flags, &self.dentry, source)
+    }
+
     /// Unmounts the filesystem mounted at the current path.
     ///
     /// Returns the unmounted child mount on success.

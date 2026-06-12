@@ -153,6 +153,7 @@ fn init_in_first_kthread(path_resolver: &PathResolver) {
     // in case any irq handler uses work queue as bottom half
     crate::thread::work_queue::init_in_first_kthread();
     crate::device::init_in_first_kthread();
+    aster_dm::init_in_first_kthread();
     crate::net::init_in_first_kthread();
     crate::fs::init_in_first_kthread(path_resolver);
     #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
