@@ -160,7 +160,9 @@ fn init_in_first_kthread(path_resolver: &PathResolver) {
 
     #[cfg(all(target_arch = "x86_64", feature = "cvm_guest"))]
     ostd::mm::frame::spawn_eager_accept_workers(|cpu_id, task_fn| {
-        ThreadOptions::new(task_fn).cpu_affinity(cpu_id.into()).spawn();
+        ThreadOptions::new(task_fn)
+            .cpu_affinity(cpu_id.into())
+            .spawn();
     });
 
     #[cfg(all(target_arch = "x86_64", feature = "cvm_guest"))]

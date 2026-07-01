@@ -38,11 +38,7 @@
 //! For the TDX architecture specification see Intel's
 //! [TDX Module Specification](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-trust-domain-extensions.html).
 
-use core::{
-    mem::offset_of,
-    sync::atomic::Ordering,
-    time::Duration,
-};
+use core::{mem::offset_of, sync::atomic::Ordering, time::Duration};
 
 use aster_util::{field_ptr, safe_ptr::SafePtr};
 use device_id::{DeviceId, MinorId};

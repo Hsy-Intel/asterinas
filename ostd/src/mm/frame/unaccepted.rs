@@ -458,8 +458,12 @@ fn try_prepare_eager_accept_for_smp_boot() {
     };
 
     let ap_boot_region = crate::arch::boot::smp::reclaimable_memory_region();
-    let pre_smp_start = u64::try_from(ap_boot_region.base()).unwrap().max(table_phys_base);
-    let pre_smp_end = u64::try_from(ap_boot_region.end()).unwrap().min(coverage_end);
+    let pre_smp_start = u64::try_from(ap_boot_region.base())
+        .unwrap()
+        .max(table_phys_base);
+    let pre_smp_end = u64::try_from(ap_boot_region.end())
+        .unwrap()
+        .min(coverage_end);
 
     if pre_smp_start < pre_smp_end {
         crate::early_println!(
@@ -901,7 +905,7 @@ fn eager_worker_count() -> usize {
 }
 
 fn eager_accept_worker_loop(worker_id: usize, worker_count: usize) {
-    use core::sync::atomic::Ordering::{Acquire, AcqRel, Release};
+    use core::sync::atomic::Ordering::{AcqRel, Acquire, Release};
 
     crate::info!(
         "eager accept worker started: worker_id={}, worker_count={}",
@@ -950,7 +954,10 @@ fn eager_accept_worker_loop(worker_id: usize, worker_count: usize) {
             coverage_end
         );
     } else if !EAGER_ACCEPT_COMPLETED.load(Acquire) {
-        crate::debug!("eager accept worker {} finished its shard partition", worker_id);
+        crate::debug!(
+            "eager accept worker {} finished its shard partition",
+            worker_id
+        );
     }
 }
 

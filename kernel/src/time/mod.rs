@@ -185,9 +185,7 @@ pub(super) fn sleep_for(duration: Duration) {
     use crate::time::clocks::MonotonicClock;
     let waiter = ostd::sync::Waiter::new_pair().0;
     let timer_manager = MonotonicClock::timer_manager();
-    let timeout = wait::ManagedTimeout::new_with_manager(
-        timer::Timeout::After(duration),
-        timer_manager,
-    );
+    let timeout =
+        wait::ManagedTimeout::new_with_manager(timer::Timeout::After(duration), timer_manager);
     let _ = waiter.wait_until_or_timeout(|| None::<()>, timeout);
 }
