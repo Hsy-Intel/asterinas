@@ -131,6 +131,16 @@ pub fn spawn_background_accept_worker(
     });
 }
 
+/// Spawns per-CPU workers that complete staged eager acceptance after SMP startup.
+#[cfg(all(target_arch = "x86_64", feature = "cvm_guest"))]
+pub fn spawn_eager_accept_workers(
+    spawner: impl Fn(crate::cpu::CpuId, alloc::boxed::Box<dyn FnOnce() + Send>),
+) {
+    crate::if_tdx_enabled!({
+        unaccepted::spawn_eager_accept_workers(spawner);
+    });
+}
+
 /// Returns the maximum physical address that is tracked by frame metadata.
 pub(in crate::mm) fn max_paddr() -> Paddr {
     let max_paddr = MAX_PADDR.load(Ordering::Relaxed) as Paddr;

@@ -140,7 +140,7 @@ fn ap_boot_code_size() -> usize {
     __ap_boot_end as *const () as usize - __ap_boot_start as *const () as usize
 }
 
-pub(super) fn reclaimable_memory_region() -> MemoryRegion {
+pub(crate) fn reclaimable_memory_region() -> MemoryRegion {
     MemoryRegion::new(
         AP_BOOT_START_PA,
         ap_boot_code_size(),

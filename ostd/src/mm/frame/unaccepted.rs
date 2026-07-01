@@ -147,7 +147,7 @@ pub(super) fn init() {
     init_accept_mode_from_cmdline();
 
     if load_unaccepted_table().is_some() {
-        try_eager_accept_memory();
+        try_prepare_eager_accept_for_smp_boot();
     } else {
         crate::warn!("Unaccepted memory table is unavailable; fallback accept path will be used");
     }
@@ -328,6 +328,34 @@ pub(super) fn spawn_background_accept_worker(
     );
 }
 
+/// Spawns per-CPU workers that eagerly accept the remaining bitmap-covered memory in parallel.
+pub(super) fn spawn_eager_accept_workers(
+    spawner: impl Fn(crate::cpu::CpuId, alloc::boxed::Box<dyn FnOnce() + Send>),
+) {
+    if get_accept_memory_mode() != AcceptMemoryMode::Eager
+        || EAGER_ACCEPT_COMPLETED.load(Ordering::Acquire)
+        || EAGER_ACCEPT_WORKERS_STARTED.swap(true, Ordering::AcqRel)
+    {
+        return;
+    }
+
+    let worker_count = eager_worker_count();
+    EAGER_ACCEPT_REMAINING_WORKERS.store(worker_count, Ordering::Release);
+
+    for raw_cpu_id in 0..worker_count {
+        let cpu_id = crate::cpu::CpuId::new(raw_cpu_id as u32);
+        spawner(
+            cpu_id,
+            alloc::boxed::Box::new(move || eager_accept_worker_loop(raw_cpu_id, worker_count)),
+        );
+    }
+
+    crate::info!(
+        "accept_memory=eager staged sweep started: workers={}",
+        worker_count
+    );
+}
+
 /// Outcome of attempting to defer a usable memory range to the unaccepted reservoir.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum DeferOutcome {
@@ -397,7 +425,7 @@ fn parse_accept_mode_from_cmdline() -> AcceptMemoryMode {
     }
 }
 
-fn try_eager_accept_memory() {
+fn try_prepare_eager_accept_for_smp_boot() {
     if get_accept_memory_mode() != AcceptMemoryMode::Eager {
         return;
     }
@@ -429,26 +457,33 @@ fn try_eager_accept_memory() {
         return;
     };
 
-    crate::early_println!("[kernel] Accepting all unaccepted memory ...");
+    let ap_boot_region = crate::arch::boot::smp::reclaimable_memory_region();
+    let pre_smp_start = u64::try_from(ap_boot_region.base()).unwrap().max(table_phys_base);
+    let pre_smp_end = u64::try_from(ap_boot_region.end()).unwrap().min(coverage_end);
 
-    if accept_with_shard_locks(table, table_phys_base, coverage_end).is_ok() {
-        // Clear deferred ranges first so that observers who see
-        // `EAGER_ACCEPT_COMPLETED == true` also see an empty reservoir,
-        // maintaining the invariant: completed -> reservoir empty.
-        clear_deferred_ranges();
-        EAGER_ACCEPT_COMPLETED.store(true, Ordering::Release);
-        crate::info!(
-            "accept_memory=eager completed: accepted bitmap coverage [{:#x}, {:#x})",
-            table_phys_base,
-            coverage_end
+    if pre_smp_start < pre_smp_end {
+        crate::early_println!(
+            "[kernel] Eager-accept pre-SMP stage: accepting AP boot range [{:#x}, {:#x}) ...",
+            pre_smp_start,
+            pre_smp_end
         );
-    } else {
-        crate::error!(
-            "accept_memory=eager failed: range=[{:#x}, {:#x})",
-            table_phys_base,
-            coverage_end
-        );
+
+        if let Err(err) = accept_with_shard_locks(table, pre_smp_start, pre_smp_end) {
+            crate::error!(
+                "accept_memory=eager pre-SMP accept failed: range=[{:#x}, {:#x}), err={:?}",
+                pre_smp_start,
+                pre_smp_end,
+                err
+            );
+            return;
+        }
     }
+
+    crate::info!(
+        "accept_memory=eager staged: deferring full bitmap sweep until APs are online; coverage=[{:#x}, {:#x})",
+        table_phys_base,
+        coverage_end
+    );
 }
 
 /// Accepts a GPA range using shard-level locking for multi-CPU parallelism.
@@ -861,6 +896,93 @@ fn background_worker_count() -> usize {
     (cpus / 4).clamp(1, BACKGROUND_WORKER_MAX)
 }
 
+fn eager_worker_count() -> usize {
+    crate::cpu::num_cpus().clamp(1, SEGMENT_LOCK_COUNT)
+}
+
+fn eager_accept_worker_loop(worker_id: usize, worker_count: usize) {
+    use core::sync::atomic::Ordering::{Acquire, AcqRel, Release};
+
+    crate::info!(
+        "eager accept worker started: worker_id={}, worker_count={}",
+        worker_id,
+        worker_count
+    );
+
+    let Some(table_ptr) = load_unaccepted_table() else {
+        return;
+    };
+
+    // SAFETY: `table_ptr` is initialized from boot info and points to valid table memory.
+    let table = unsafe { &*table_ptr.as_ptr() };
+    let table_phys_base = table.phys_base();
+    let Some(coverage_end) = table.bitmap_coverage_end() else {
+        crate::error!(
+            "accept_memory=eager worker {} observed bitmap coverage overflow",
+            worker_id
+        );
+        return;
+    };
+
+    if let Err(err) = accept_bitmap_shard_partition(
+        table,
+        table_phys_base,
+        coverage_end,
+        worker_id,
+        worker_count,
+    ) {
+        crate::error!(
+            "accept_memory=eager worker {} failed: coverage=[{:#x}, {:#x}), err={:?}",
+            worker_id,
+            table_phys_base,
+            coverage_end,
+            err
+        );
+        return;
+    }
+
+    if EAGER_ACCEPT_REMAINING_WORKERS.fetch_sub(1, AcqRel) == 1 {
+        clear_deferred_ranges();
+        EAGER_ACCEPT_COMPLETED.store(true, Release);
+        crate::info!(
+            "accept_memory=eager completed: accepted bitmap coverage [{:#x}, {:#x})",
+            table_phys_base,
+            coverage_end
+        );
+    } else if !EAGER_ACCEPT_COMPLETED.load(Acquire) {
+        crate::debug!("eager accept worker {} finished its shard partition", worker_id);
+    }
+}
+
+fn accept_bitmap_shard_partition(
+    table: &EfiUnacceptedMemory,
+    start: u64,
+    end: u64,
+    worker_id: usize,
+    worker_count: usize,
+) -> Result<(), AcceptError> {
+    if start >= end {
+        return Ok(());
+    }
+
+    let shard_bytes = SEGMENT_BYTES as u64;
+    let first_shard = (start / shard_bytes) as usize;
+    let last_shard_exclusive = end.div_ceil(shard_bytes) as usize;
+
+    for shard_number in first_shard..last_shard_exclusive {
+        if shard_number % worker_count != worker_id {
+            continue;
+        }
+
+        let shard_start = (shard_number as u64).saturating_mul(shard_bytes).max(start);
+        let shard_end = ((shard_number as u64 + 1).saturating_mul(shard_bytes)).min(end);
+
+        accept_with_shard_locks(table, shard_start, shard_end)?;
+    }
+
+    Ok(())
+}
+
 struct DeferPlan {
     required_range_slots: [usize; SEGMENT_LOCK_COUNT],
     touched_segments: [usize; SEGMENT_LOCK_COUNT],
@@ -1109,3 +1231,5 @@ static NONEMPTY_SEGMENT_HINT_BITMAP: AtomicU64 = AtomicU64::new(0);
 
 static BACKGROUND_WORKER_STARTED: AtomicBool = AtomicBool::new(false);
 static BACKGROUND_WORKER_DISABLED: AtomicBool = AtomicBool::new(false);
+static EAGER_ACCEPT_WORKERS_STARTED: AtomicBool = AtomicBool::new(false);
+static EAGER_ACCEPT_REMAINING_WORKERS: AtomicUsize = AtomicUsize::new(0);
