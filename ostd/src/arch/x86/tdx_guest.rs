@@ -102,20 +102,30 @@ unsafe fn convert_gpa_range(
     let mut retry_count = 0;
 
     loop {
-        let gpa_with_mask = next_gpa | target_state.as_gpa_mask();
+        let gpa_mask = target_state.as_gpa_mask();
+        let gpa_with_mask = next_gpa | gpa_mask;
         let remaining_size = end_gpa - next_gpa;
 
         match map_gpa(gpa_with_mask, remaining_size) {
             Ok(()) => return Ok(()),
-            Err((retry_gpa, TdVmcallError::TdxRetry))
-                if (next_gpa..end_gpa).contains(&retry_gpa)
-                    && retry_gpa.is_multiple_of(PAGE_SIZE as u64) =>
-            {
+            Err((output_value, TdVmcallError::TdxRetry)) => {
+                let end_gpa_with_mask = end_gpa | gpa_mask;
+                if !(gpa_with_mask..end_gpa_with_mask).contains(&output_value)
+                    || !output_value.is_multiple_of(PAGE_SIZE as u64)
+                {
+                    return Err(PageConvertError::TdVmcall {
+                        output_value,
+                        error: TdVmcallError::TdxRetry,
+                        retry_count,
+                    });
+                }
+
+                let retry_gpa = output_value & !gpa_mask;
                 if retry_gpa == next_gpa {
                     retry_count += 1;
                     if retry_count >= MAX_MAP_GPA_RETRIES_PER_PAGE {
                         return Err(PageConvertError::TdVmcall {
-                            output_value: retry_gpa,
+                            output_value,
                             error: TdVmcallError::TdxRetry,
                             retry_count,
                         });
